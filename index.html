@@ -137,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.06</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.06b</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -1850,6 +1850,9 @@ function parsePO(text) {
       const svuMatch = text.match(/SUPERVALU\s*-\s*([A-Z][A-Z\s]+?)(?:\s{2,}|$)/m);
       if (svuMatch) dcKey = svuMatch[1].trim().toLowerCase();
     }
+
+    // Normalize whitespace in dcKey (PDF.js often inserts extra spaces)
+    if (dcKey) dcKey = dcKey.replace(/\s+/g, ' ').trim();
 
     // Look up DC in database
     var fulfillment = '';
@@ -5236,6 +5239,6 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.06</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.06b</div>
 </body>
 </html>
