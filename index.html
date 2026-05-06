@@ -137,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.06b</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.06d</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -147,6 +147,7 @@
     <div class="upload-area" id="uploadArea" onclick="document.getElementById('poFile').click()">
       <p class="upload-main">Drop PO PDF here or click to browse</p>
       <p>Supports UNFI, KeHE, Thrive Market, Foundation Foods, Market of Choice, Sierra Trading Post, HomeGoods, and Grocery Outlet orders (PDF, HTML, or XLSX)</p>
+      <p style="margin-top:6px;"><a href="#" onclick="event.preventDefault();event.stopPropagation();document.getElementById('accountsModal').style.display='flex';" style="font-size:12px;color:#2563eb;text-decoration:underline;">View all supported accounts &amp; DCs</a></p>
       <input type="file" id="poFile" accept=".pdf,.html,.htm,.xlsx,.xls" onchange="handlePOUpload(event)">
     </div>
     <div class="status" id="uploadStatus"></div>
@@ -1902,24 +1903,27 @@ function parsePO(text) {
   } else if (isKeHE) {
     // KeHE format - PDF.js often merges Ship To / Bill To / Vendor columns onto
     // the same text line, making block-based extraction unreliable.
-    // Strategy: find the FIRST "KEHE DISTRIBUTORS" block with an address/zip,
-    // then match the zip against the DC database. The DB has correct addresses
-    // for all known DCs so we always prefer the DB values.
+    // Strategy: find ALL 5-digit zips in the text, match each against the DC database,
+    // and PREFER non-Elkton matches (32033 is always the Bill To / HQ address).
 
-    // Step 1: Extract the Ship To address block (first KEHE DISTRIBUTORS occurrence)
-    const keheAddrBlock = text.match(/KEHE\s+DISTRIBUTORS[\s\S]{0,120}?([A-Z][\w\s,]+,\s*[A-Z]{2}\s+(\d{5}))/i);
-    const shipToZip = keheAddrBlock ? keheAddrBlock[2] : '';
-
-    // Step 2: Match zip against DC database (zip is unique and unambiguous)
-    if (shipToZip) {
+    // Step 1: Find ALL 5-digit zips and match against DC database
+    const allZips = [...new Set((text.match(/\b\d{5}\b/g) || []))];
+    const dcMatches = [];
+    for (const zip of allZips) {
       for (const [key, dc] of Object.entries(KEHE_DC_DATABASE)) {
-        if (dc.csz && dc.csz.includes(shipToZip)) {
-          ship_name = dc.displayName || dc.name;
-          ship_addr = dc.addr;
-          ship_csz = dc.csz;
-          break;
+        if (dc.csz && dc.csz.includes(zip)) {
+          dcMatches.push({ key, dc, zip });
         }
       }
+    }
+
+    // Step 2: Prefer non-Elkton match (Elkton 32033 is always Bill To)
+    if (dcMatches.length > 0) {
+      const nonElkton = dcMatches.filter(m => m.key !== 'elkton');
+      const best = nonElkton.length > 0 ? nonElkton[0] : dcMatches[0];
+      ship_name = best.dc.displayName || best.dc.name;
+      ship_addr = best.dc.addr;
+      ship_csz = best.dc.csz;
     }
 
     // Step 3: If zip match failed, try city name match (skip 'portland' — it's the vendor city)
@@ -5239,6 +5243,96 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.06b</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.06d</div>
+
+<!-- Supported Accounts Modal -->
+<div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:white;border-radius:12px;max-width:680px;width:90%;max-height:85vh;overflow-y:auto;padding:28px;position:relative;box-shadow:0 8px 30px rgba(0,0,0,0.2);">
+    <button onclick="document.getElementById('accountsModal').style.display='none'" style="position:absolute;top:12px;right:16px;background:none;border:none;font-size:22px;cursor:pointer;color:#999;">&times;</button>
+    <h2 style="font-size:18px;font-weight:700;margin-bottom:4px;">Supported Accounts &amp; DCs</h2>
+    <p style="font-size:12px;color:#666;margin-bottom:20px;">All distributors and distribution centers the label generator can parse automatically.</p>
+
+    <div style="margin-bottom:18px;">
+      <div style="font-size:14px;font-weight:700;color:#1e40af;margin-bottom:8px;border-bottom:2px solid #dbeafe;padding-bottom:4px;">UNFI</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:13px;">
+        <div><span style="color:#16a34a;">&#9679;</span> Aurora, CO</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Carlisle, PA</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Chesterfield, NH</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Dayville, CT</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Greenwood, IN</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Howell, NJ</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Iowa City, IA</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Lancaster, TX</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Moreno Valley, CA</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Richburg, SC</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Ridgefield, WA</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Rocklin, CA</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Sarasota, FL</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Twin Cities (N. Prescott), WI</div>
+      </div>
+      <div style="font-size:11px;color:#888;margin-top:4px;">Also detects Atlanta, GA and Racine, WI (limited address data)</div>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <div style="font-size:14px;font-weight:700;color:#1e40af;margin-bottom:8px;border-bottom:2px solid #dbeafe;padding-bottom:4px;">KeHE</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:13px;">
+        <div><span style="color:#16a34a;">&#9679;</span> Bloomington, IN</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Breinigsville, PA</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Chino, CA</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Dallas, TX</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Elkton, FL</div>
+        <div><span style="color:#16a34a;">&#9679;</span> North East, MD</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Portland (Beaverton), OR</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Stockton, CA</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <div style="font-size:14px;font-weight:700;color:#1e40af;margin-bottom:8px;border-bottom:2px solid #dbeafe;padding-bottom:4px;">Thrive Market</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:13px;">
+        <div><span style="color:#16a34a;">&#9679;</span> Batesville, IN</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Hanover Township, PA</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Reno (Sparks), NV</div>
+      </div>
+      <div style="font-size:11px;color:#888;margin-top:4px;">Includes SSCC pallet label generation</div>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <div style="font-size:14px;font-weight:700;color:#1e40af;margin-bottom:8px;border-bottom:2px solid #dbeafe;padding-bottom:4px;">Sierra Trading Post / TJX</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:13px;">
+        <div><span style="color:#16a34a;">&#9679;</span> Cheyenne, WY (DC #0810)</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Ashville, OH (DC #0860)</div>
+      </div>
+      <div style="font-size:11px;color:#888;margin-top:4px;">Supports multi-DC split orders</div>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <div style="font-size:14px;font-weight:700;color:#1e40af;margin-bottom:8px;border-bottom:2px solid #dbeafe;padding-bottom:4px;">HomeGoods / TJX</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:13px;">
+        <div><span style="color:#16a34a;">&#9679;</span> San Pedro, CA (DC #881)</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Tucson, AZ (DC #882)</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Carteret, NJ (DC #883)</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Jefferson, GA (DC #884)</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Bloomfield, CT (DC #885)</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Lordstown, OH (DC #886)</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:18px;">
+      <div style="font-size:14px;font-weight:700;color:#1e40af;margin-bottom:8px;border-bottom:2px solid #dbeafe;padding-bottom:4px;">Other</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:13px;">
+        <div><span style="color:#16a34a;">&#9679;</span> Foundation Foods (San Clemente, CA)</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Market of Choice (Eugene, OR)</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Grocery Outlet</div>
+      </div>
+    </div>
+
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;font-size:12px;color:#555;">
+      <strong>Shipping instructions available for:</strong> Greenwood, Howell, Moreno Valley, Chesterfield, Dayville, Sarasota, Aurora, Rocklin, Ridgefield, Iowa City, Richburg, Twin Cities, Lancaster, Thrive (all DCs), Foundation Foods.
+      <br><strong>Missing instructions:</strong> Carlisle, Atlanta, Racine — add via code update.
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
