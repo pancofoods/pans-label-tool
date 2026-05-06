@@ -134,7 +134,10 @@
 </head>
 <body>
 <div class="container">
-  <h1>Pan&#8217;s Mushroom Jerky</h1>
+  <div style="display:flex;justify-content:space-between;align-items:baseline;">
+    <h1>Pan&#8217;s Mushroom Jerky</h1>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.06</span>
+  </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
   <!-- PO Upload -->
@@ -331,6 +334,16 @@ for (const [flavor, p] of Object.entries(PRODUCTS)) {
 }
 // Thrive uses PMJ101 for Original (UNFI uses PMJ102) - same product, same UPC
 SKU_MAP['PMJ101'] = 'Original';
+
+// Foundation Foods uses PAN-001 through PAN-006
+const FF_SKU_MAP = {
+  'PAN-001': 'Original',
+  'PAN-002': 'Zesty Thai',
+  'PAN-003': 'Salt & Pepper',
+  'PAN-004': 'Applewood BBQ',
+  'PAN-005': 'Teriyaki',
+  'PAN-006': 'Curry',
+};
 
 const SENDER = { name: "Pan\u2019s Mushroom Jerky", address: "302 SE 7th Avenue", csz: "Portland, OR 97214-1201", email: "orders@mushroomjerky.com" };
 
@@ -716,6 +729,7 @@ const DC_DATABASE = {
   'aurora':        { name: 'UNFI - Aurora', addr: '17901 East 40th Ave', csz: 'Aurora, CO 80011' },
   'sarasota':      { name: 'UNFI - Sarasota', addr: '8380 21st Street East', csz: 'Sarasota, FL 34243' },
   'twin cities':   { name: 'UNFI Twin Cities', addr: '1101 Dexter Street North', csz: 'North Prescott, WI 54021' },
+  'north prescott': { name: 'UNFI Twin Cities', addr: '1101 Dexter Street North', csz: 'North Prescott, WI 54021' },
   'lancaster':     { name: 'UNFI Lancaster', addr: '2100 Danieldale Road', csz: 'Lancaster, TX 75134' },
   'rocklin':       { name: 'UNFI - Rocklin', addr: '1101 Sunset Blvd', csz: 'Rocklin, CA 95765' },
   'ridgefield':    { name: 'UNFI - RIDGEFIELD, WA', addr: '7909 South Union Ridge Parkway', csz: 'Ridgefield, WA 98642' },
@@ -1718,7 +1732,8 @@ function parsePO(text) {
   const isKeHE = !isThrive && !isGroceryOutlet && /KeHE/i.test(text);
   const isHomeGoods = !isGroceryOutlet && /HomeGoods|ROUTING\s+AND\s+DISTRIBUTION\s+INSTRUCTIONS/i.test(text);
   const isSierra = !isHomeGoods && !isGroceryOutlet && /Sierra|sierratradingpost|TJX\s+Certificate/i.test(text);
-  const isUNFI = !isThrive && !isKeHE && !isSierra && !isHomeGoods && !isGroceryOutlet && /UNFI|SUPERVALU|Greenwood|PANCO/i.test(text);
+  const isFoundationFoods = !isGroceryOutlet && /Foundation\s*Foods/i.test(text);
+  const isUNFI = !isThrive && !isKeHE && !isSierra && !isHomeGoods && !isGroceryOutlet && !isFoundationFoods && /UNFI|SUPERVALU|Greenwood|PANCO/i.test(text);
 
   // HomeGoods: delegate to dedicated parser immediately
   if (isHomeGoods) {
@@ -1742,6 +1757,9 @@ function parsePO(text) {
     po_number = poMatch ? poMatch[1] : '';
   } else if (isKeHE) {
     const poMatch = text.match(/Order\s*#:?\s*(\d+)/i) || text.match(/PO\s*#?:?\s*(\d+)/i);
+    po_number = poMatch ? poMatch[1] : '';
+  } else if (isFoundationFoods) {
+    const poMatch = text.match(/P\.?O\.?\s*(?:NO\.?|#|Number)\s*:?\s*(\d+)/i);
     po_number = poMatch ? poMatch[1] : '';
   } else if (isGroceryOutlet) {
     const poMatch = text.match(/PO\s+(\d+)/i) || text.match(/Purchase\s*Order[\s\S]{0,30}?(\d{5,})/i);
@@ -1863,40 +1881,47 @@ function parsePO(text) {
         if (addrMatch) ship_addr = addrMatch[1].trim().split(/\s+\d{4,}|\s+PAN/)[0].trim();
       }
     }
+  } else if (isFoundationFoods) {
+    // Foundation Foods - Ship To is in the PO itself
+    const ffShipBlock = text.match(/SHIP\s*TO\s*([\s\S]*?)(?:P\.?O\.?\s*NO|DATE\b)/i);
+    if (ffShipBlock) {
+      const lines = ffShipBlock[1].trim().split(/\n/).map(l => l.trim()).filter(l => l && l !== 'USA');
+      if (lines.length >= 1) ship_name = lines[0];
+      if (lines.length >= 2) ship_addr = lines[1];
+      if (lines.length >= 3) ship_csz = lines[2];
+    }
+    if (!ship_name) {
+      ship_name = 'Foundation Foods LLC';
+      ship_addr = '934 Calle Negocio Ste A';
+      ship_csz = 'San Clemente, CA 92673-6210';
+    }
   } else if (isKeHE) {
-    // KeHE format - PDF.js merges Ship To / Bill To / Vendor columns onto the
-    // same text lines, making positional parsing unreliable.
-    // Strategy: find ALL 5-digit zip codes in the text, match each against the
-    // KeHE DC database, and pick the Ship To DC. Since Elkton (32033) is ALWAYS
-    // the Bill To address on every KeHE PO, we prefer any non-Elkton DC match.
-    // If the only DC zip found is Elkton, then Elkton IS the actual Ship To.
+    // KeHE format - PDF.js often merges Ship To / Bill To / Vendor columns onto
+    // the same text line, making block-based extraction unreliable.
+    // Strategy: find the FIRST "KEHE DISTRIBUTORS" block with an address/zip,
+    // then match the zip against the DC database. The DB has correct addresses
+    // for all known DCs so we always prefer the DB values.
 
-    // Step 1: Collect all 5-digit zips from the text
-    const allZips = [...new Set((text.match(/\b\d{5}\b/g) || []))];
+    // Step 1: Extract the Ship To address block (first KEHE DISTRIBUTORS occurrence)
+    const keheAddrBlock = text.match(/KEHE\s+DISTRIBUTORS[\s\S]{0,120}?([A-Z][\w\s,]+,\s*[A-Z]{2}\s+(\d{5}))/i);
+    const shipToZip = keheAddrBlock ? keheAddrBlock[2] : '';
 
-    // Step 2: Match each zip against the DC database
-    const dcMatches = [];
-    for (const zip of allZips) {
+    // Step 2: Match zip against DC database (zip is unique and unambiguous)
+    if (shipToZip) {
       for (const [key, dc] of Object.entries(KEHE_DC_DATABASE)) {
-        if (dc.csz && dc.csz.includes(zip)) {
-          dcMatches.push({ key, dc, zip });
+        if (dc.csz && dc.csz.includes(shipToZip)) {
+          ship_name = dc.displayName || dc.name;
+          ship_addr = dc.addr;
+          ship_csz = dc.csz;
+          break;
         }
       }
     }
 
-    // Step 3: Prefer non-Elkton match (Elkton 32033 is always in Bill To)
-    if (dcMatches.length > 0) {
-      const nonElkton = dcMatches.filter(m => m.key !== 'elkton');
-      const best = nonElkton.length > 0 ? nonElkton[0] : dcMatches[0];
-      ship_name = best.dc.displayName || best.dc.name;
-      ship_addr = best.dc.addr;
-      ship_csz = best.dc.csz;
-    }
-
-    // Step 4: If no DB match, try city name fallback (skip portland — vendor city)
+    // Step 3: If zip match failed, try city name match (skip 'portland' — it's the vendor city)
     if (!ship_name) {
       for (const [key, dc] of Object.entries(KEHE_DC_DATABASE)) {
-        if (key === 'portland') continue;
+        if (key === 'portland') continue; // Skip — conflicts with vendor Ship From
         if (text.toLowerCase().includes(key)) {
           ship_name = dc.displayName || dc.name;
           ship_addr = dc.addr;
@@ -1906,7 +1931,7 @@ function parsePO(text) {
       }
     }
 
-    // Step 5: If still no match, parse from text as last resort
+    // Step 4: If still no match, parse from text as last resort
     if (!ship_addr || !ship_csz || !/\d{5}/.test(ship_csz)) {
       const keheShipBlock = text.match(/KEHE\s+DISTRIBUTORS\s*\n\s*(\d+[^\n]+)\s*\n\s*([A-Z][A-Za-z\s]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?)/i);
       if (keheShipBlock) {
@@ -2045,6 +2070,21 @@ function parsePO(text) {
           else if (/TERIY|TERYKI/i.test(line)) flavor = 'Teriyaki';
 
           if (flavor && qty > 0) line_items.push({ flavor, qty });
+        }
+      }
+    }
+  } else if (isFoundationFoods) {
+    // Foundation Foods: PAN-001 through PAN-006, quantities in EACHES (not cases)
+    // Each master case = 24 eaches (2.2oz) or 48 eaches (1oz)
+    for (const [ffSku, flavor] of Object.entries(FF_SKU_MAP)) {
+      const pattern = new RegExp(ffSku.replace('-', '[\\s-]') + '\\s*[-–]?\\s*.*?\\s+(\\d+)\\s+[\\d.]+\\s+[\\d,.]+', 'i');
+      const match = text.match(pattern);
+      if (match) {
+        const eaches = parseInt(match[1]);
+        const casesPerMC = flavor.includes('1oz') ? 48 : 24;
+        const masterCases = Math.round(eaches / casesPerMC);
+        if (masterCases > 0) {
+          line_items.push({ flavor, qty: masterCases });
         }
       }
     }
@@ -3549,6 +3589,9 @@ const SHIPPING_INSTRUCTIONS = {
   rocklin: { type: 'unishippers', transitTime: 'LTL 2-3 days / UPS 2 days', deliveryInstructions: 'Appointment Hrs: 02:00-08:30 (AM)\nEmail: RocklinAppts@unfi.com', preferredCarriers: 'ABF\nOld Dominion - daily delivery/drops\nSAIA - Tues/Thurs delivery\nReddaway - 3 deliveries/week (usually MWF)\nEstes - confirmed Nov 2023 they deliver to UNFI Rocklin', doNotUse: 'XPO\nRoadrunner\nForward Air\nT-Force', notes: 'Only use preferred carriers due to overnight receiving hours. 2nd option: Estes (books appointments after freight arrives at terminal, 2-4 more days to deliver)' },
   ridgefield: { type: 'unishippers', transitTime: '', deliveryInstructions: 'RidgefieldAppts@unfi.com\nAppt hrs: M-F 2am-8am', preferredCarriers: 'Old Dominion\nEstes', doNotUse: '', notes: '' },
   iowa_city: { type: 'unishippers', transitTime: '', deliveryInstructions: 'IOWappointmentdesk@unfi.com\nAppointment hours: M-F 1am-6am\n(319) 337 4471\n(800) 3232131', preferredCarriers: 'Estes - trailer drop every Wednesday\nOld Dominion - live unloads, typically delivers 2-5 business days after freight arrives at destination terminal\nTforce - live unloads once every couple of weeks based on volume (do not use unless you have a lot of lead time)', doNotUse: '', notes: '' },
+  richburg: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Email: RCHAppts@unfi.com', preferredCarriers: 'Estes - drops 1-2 trailers per week\nOld Dominion - drops trailers every few days\nTforce - delivers once every couple of weeks', doNotUse: '', notes: '' },
+  twin_cities: { type: 'unishippers', transitTime: '', deliveryInstructions: '', preferredCarriers: '', doNotUse: '', notes: '' },
+  lancaster: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Appt by Email: lancasterappts@unfi.com\nPhone: (972) 228-5000 x52741', preferredCarriers: '', doNotUse: '', notes: '' },
   carlisle: { type: 'unishippers', transitTime: '', deliveryInstructions: '', preferredCarriers: '', doNotUse: '', notes: '' },
   thrive_batesville: { type: 'unishippers', transitTime: 'LTL 4-7 days / UPS 4 days', deliveryInstructions: 'Appointments available 6am to 1pm (Eastern Standard Time)\nCall 812-932-0790 option 2 or email Batesville.Receiving@thrivemarket.com\nDeliveries must be scheduled 72 hours in advance\nDeliveries are made in the rear of the building, approximately dock door 44', preferredCarriers: 'FedEx Freight\nOld Dominion\nEstes\nTforce\nHolland\nYRC\nDayton Freight Lines', doNotUse: 'XPO\nDhorn\nUSPS is not allowed', notes: '' },
   thrive_reno: { type: 'unishippers', transitTime: 'LTL 2-3 days / UPS 3 days', deliveryInstructions: 'Appt req 6am-2pm PT M-Fr\nCall (775) 372-9077 or email Reno.Receiving@thrivemarket.com', preferredCarriers: 'SAIA\nDHE\nFedEx Freight\nUPS Ground', doNotUse: 'YRC\nABF\nOld Dominion\nTForce\nUSPS is not allowed', notes: '' },
@@ -3556,7 +3599,8 @@ const SHIPPING_INSTRUCTIONS = {
   kehe: { type: 'fob_pickup', notes: 'KeHE arranges their own pick-up. BOL needed. Include invoice and packing slip on outside of wrapped pallet.' },
   sierra_tjx: { type: 'fob_pickup', notes: 'TJX/Sierra arranges their own pick-up. Create internal BOL.' },
   homegoods: { type: 'fob_pickup', notes: 'HomeGoods arranges their own pick-up. Create internal BOL.' },
-  grocery_outlet: { type: 'fob_pickup', notes: 'Grocery Outlet Inbound Traffic coordinates First Mile logistics. Pick Up at Pan\'s. BOL needed.' }
+  grocery_outlet: { type: 'fob_pickup', notes: 'Grocery Outlet Inbound Traffic coordinates First Mile logistics. Pick Up at Pan\'s. BOL needed.' },
+  foundation_foods: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Contact: 949.391.7660 ext 4 (Warehouse & Deliveries)\nEmail: Shipping@foundationfoods.com\nReceiving Hours: Mon-Thurs 9:30am-3:30pm\nNo deliveries on Fridays or weekends', preferredCarriers: '', doNotUse: '', notes: 'Send tracking info and shipment updates to Shipping@foundationfoods.com\nAll quantities on PO are in eaches (not cases)' }
 };
 
 function matchShipToName(shipToName) {
@@ -3569,9 +3613,13 @@ function matchShipToName(shipToName) {
   if (name.includes('sarasota')) return 'sarasota';
   if (name.includes('aurora') && (name.includes('unfi') || name.includes('united natural'))) return 'aurora_unfi';
   if (name.includes('rocklin')) return 'rocklin';
+  if (name.includes('richburg')) return 'richburg';
   if (name.includes('ridgefield')) return 'ridgefield';
   if (name.includes('iowa')) return 'iowa_city';
+  if (name.includes('twin cities') || name.includes('prescott')) return 'twin_cities';
+  if (name.includes('lancaster')) return 'lancaster';
   if (name.includes('carlisle')) return 'carlisle';
+  if (name.includes('foundation foods')) return 'foundation_foods';
   if (name.includes('batesville')) return 'thrive_batesville';
   if (name.includes('reno') && name.includes('thrive')) return 'thrive_reno';
   if (name.includes('hanover') && name.includes('thrive')) return 'thrive_hanover';
@@ -3652,7 +3700,7 @@ function buildShippingInstructions(prefix) {
     if (info.preferredCarriers) {
       html += '<div style="margin-bottom:10px;"><label style="font-weight:600; font-size:12px; display:block; margin-bottom:3px; color:#16a34a;">Preferred Carriers</label>';
       html += '<div style="display:flex; gap:6px;">';
-      html += '<textarea id="' + uid + 'carriers" readonly style="flex:1; padding:6px; border:1px solid #d1d5db; border-radius:4px; font-family:monospace; font-size:12px; resize:vertical; min-height:50px;">' + info.preferredCarriers.replace(/\\n/g, '\n') + '</textarea>';
+      html += '<textarea id="' + uid + 'carriers" readonly style="flex:1; padding:6px; border:1px solid #d1d5db; border-radius:4px; font-family:monospace; font-size:12px; resize:vertical; min-height:100px;">' + info.preferredCarriers.replace(/\\n/g, '\n') + '</textarea>';
       html += '<button id="' + uid + 'carriers_btn" onclick="copyField(\'' + uid + 'carriers\')" style="padding:6px 12px; background:#2563eb; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px; white-space:nowrap; align-self:flex-start;">Copy</button>';
       html += '</div></div>';
     }
@@ -3661,7 +3709,7 @@ function buildShippingInstructions(prefix) {
     if (info.doNotUse) {
       html += '<div style="margin-bottom:10px;"><label style="font-weight:600; font-size:12px; display:block; margin-bottom:3px; color:#dc2626;">Do Not Use</label>';
       html += '<div style="display:flex; gap:6px;">';
-      html += '<textarea id="' + uid + 'donotuse" readonly style="flex:1; padding:6px; border:1px solid #fecaca; border-radius:4px; font-family:monospace; font-size:12px; resize:vertical; min-height:36px; background:#fef2f2;">' + info.doNotUse.replace(/\\n/g, '\n') + '</textarea>';
+      html += '<textarea id="' + uid + 'donotuse" readonly style="flex:1; padding:6px; border:1px solid #fecaca; border-radius:4px; font-family:monospace; font-size:12px; resize:vertical; min-height:80px; background:#fef2f2;">' + info.doNotUse.replace(/\\n/g, '\n') + '</textarea>';
       html += '<button id="' + uid + 'donotuse_btn" onclick="copyField(\'' + uid + 'donotuse\')" style="padding:6px 12px; background:#2563eb; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px; white-space:nowrap; align-self:flex-start;">Copy</button>';
       html += '</div></div>';
     }
@@ -5187,6 +5235,6 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">v2026.04.30</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.06</div>
 </body>
 </html>
