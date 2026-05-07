@@ -137,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.06d</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.07</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -146,9 +146,9 @@
     <div class="card-title">Upload Purchase Order</div>
     <div class="upload-area" id="uploadArea" onclick="document.getElementById('poFile').click()">
       <p class="upload-main">Drop PO PDF here or click to browse</p>
-      <p>Supports UNFI, KeHE, Thrive Market, Foundation Foods, Market of Choice, Sierra Trading Post, HomeGoods, and Grocery Outlet orders (PDF, HTML, or XLSX)</p>
+      <p>Supports UNFI, KeHE, Thrive Market, Foundation Foods, Market of Choice, Sierra Trading Post, HomeGoods, and Grocery Outlet orders (PDF, HTML, TXT, or XLSX)</p>
       <p style="margin-top:6px;"><a href="#" onclick="event.preventDefault();event.stopPropagation();document.getElementById('accountsModal').style.display='flex';" style="font-size:12px;color:#2563eb;text-decoration:underline;">View all supported accounts &amp; DCs</a></p>
-      <input type="file" id="poFile" accept=".pdf,.html,.htm,.xlsx,.xls" onchange="handlePOUpload(event)">
+      <input type="file" id="poFile" accept=".pdf,.html,.htm,.xlsx,.xls,.txt,.text" onchange="handlePOUpload(event)">
     </div>
     <div class="status" id="uploadStatus"></div>
   </div>
@@ -763,7 +763,7 @@ const KEHE_DC_DATABASE = {
   'bloomington':   { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - BLOOMINGTON', addr: '2500 W Airway Rd', csz: 'Bloomington, IN 47404' },
   'chino':         { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - CHINO', addr: '16081 Fern Avenue', csz: 'Chino, CA 91708' },
   'north east':    { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - North East MD', addr: '585 PRINCIPIO PKY W', csz: 'NORTH EAST, MD 21901' },
-  'portland':      { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - PORTLAND', addr: '14800 NW Greenbrier Pkwy', csz: 'Beaverton, OR 97006' },
+  'portland':      { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - PORTLAND', addr: '9555 NE Alderwood Rd', csz: 'Portland, OR 97220', altZips: ['97006'] },
   'stockton':      { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - STOCKTON', addr: '1055 Manthey Rd', csz: 'Stockton, CA 95210' },
   'elkton':        { name: 'KeHE Distributors', displayName: 'KEHE - Elkton', addr: '3800 Deerpark Blvd', csz: 'Elkton, FL 32033' },
 };
@@ -1084,6 +1084,7 @@ async function processPO(file) {
     let fullText = '';
     const isXLSX = file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls');
     const isHTML = file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.htm');
+    const isTXT = file.name.toLowerCase().endsWith('.txt') || file.name.toLowerCase().endsWith('.text');
 
     if (isXLSX) {
       // Parse XLSX with SheetJS (Market of Choice format)
@@ -1252,6 +1253,9 @@ async function processPO(file) {
       } else {
         fullText = doc.body.innerText || doc.body.textContent || '';
       }
+    } else if (isTXT) {
+      // Parse plain text file (SUPERVALU/Carlisle format)
+      fullText = await file.text();
     } else {
       // Parse PDF
       const arrayBuffer = await file.arrayBuffer();
@@ -1906,12 +1910,14 @@ function parsePO(text) {
     // Strategy: find ALL 5-digit zips in the text, match each against the DC database,
     // and PREFER non-Elkton matches (32033 is always the Bill To / HQ address).
 
-    // Step 1: Find ALL 5-digit zips and match against DC database
+    // Step 1: Find ALL 5-digit zips and match against DC database (including altZips)
     const allZips = [...new Set((text.match(/\b\d{5}\b/g) || []))];
     const dcMatches = [];
     for (const zip of allZips) {
       for (const [key, dc] of Object.entries(KEHE_DC_DATABASE)) {
-        if (dc.csz && dc.csz.includes(zip)) {
+        const matchesMain = dc.csz && dc.csz.includes(zip);
+        const matchesAlt = dc.altZips && dc.altZips.includes(zip);
+        if (matchesMain || matchesAlt) {
           dcMatches.push({ key, dc, zip });
         }
       }
@@ -3600,7 +3606,7 @@ const SHIPPING_INSTRUCTIONS = {
   richburg: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Email: RCHAppts@unfi.com', preferredCarriers: 'Estes - drops 1-2 trailers per week\nOld Dominion - drops trailers every few days\nTforce - delivers once every couple of weeks', doNotUse: '', notes: '' },
   twin_cities: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Appt Hours: M-F 3am-9am\nEmail: TWCAppts@unfi.com', preferredCarriers: 'Estes', doNotUse: '', notes: '' },
   lancaster: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Appt by Email: lancasterappts@unfi.com\nPhone: (972) 228-5000 x52741', preferredCarriers: '', doNotUse: '', notes: '' },
-  carlisle: { type: 'unishippers', transitTime: '', deliveryInstructions: '', preferredCarriers: '', doNotUse: '', notes: '' },
+  carlisle: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Appt requests: myunfi.com\nEmail: CRLAppts@unfi.com\nConfirmations from: tmsapp@unfi.com\nReschedule must be 24+ hrs before delivery', preferredCarriers: '', doNotUse: '', notes: '' },
   thrive_batesville: { type: 'unishippers', transitTime: 'LTL 4-7 days / UPS 4 days', deliveryInstructions: 'Appointments available 6am to 1pm (Eastern Standard Time)\nCall 812-932-0790 option 2 or email Batesville.Receiving@thrivemarket.com\nDeliveries must be scheduled 72 hours in advance\nDeliveries are made in the rear of the building, approximately dock door 44', preferredCarriers: 'FedEx Freight\nOld Dominion\nEstes\nTforce\nHolland\nYRC\nDayton Freight Lines', doNotUse: 'XPO\nDhorn\nUSPS is not allowed', notes: '' },
   thrive_reno: { type: 'unishippers', transitTime: 'LTL 2-3 days / UPS 3 days', deliveryInstructions: 'Appt req 6am-2pm PT M-Fr\nCall (775) 372-9077 or email Reno.Receiving@thrivemarket.com', preferredCarriers: 'SAIA\nDHE\nFedEx Freight\nUPS Ground', doNotUse: 'YRC\nABF\nOld Dominion\nTForce\nUSPS is not allowed', notes: '' },
   thrive_hanover: { type: 'unishippers', transitTime: 'LTL 5-6 days / UPS 4 days', deliveryInstructions: '(570) 260-1990\nhanover.Receiving@thrivemarket.com', preferredCarriers: 'Tforce\nOld Dominion\nFedEx Freight\nNew Penn\nPitt Ohio\nWard', doNotUse: 'XPO\nEstes\nUSPS is not allowed', notes: '' },
@@ -5243,7 +5249,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.06d</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.07</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
@@ -5270,7 +5276,7 @@ ssccUpdateDisplay();
         <div><span style="color:#16a34a;">&#9679;</span> Sarasota, FL</div>
         <div><span style="color:#16a34a;">&#9679;</span> Twin Cities (N. Prescott), WI</div>
       </div>
-      <div style="font-size:11px;color:#888;margin-top:4px;">Also detects Atlanta, GA and Racine, WI (limited address data)</div>
+      <div style="font-size:11px;color:#888;margin-top:4px;">Also detects Atlanta, GA and Racine, WI (limited address data). Carlisle accepts .TXT format POs.</div>
     </div>
 
     <div style="margin-bottom:18px;">
