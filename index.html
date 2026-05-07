@@ -137,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.07</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.07b</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -3606,7 +3606,7 @@ const SHIPPING_INSTRUCTIONS = {
   richburg: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Email: RCHAppts@unfi.com', preferredCarriers: 'Estes - drops 1-2 trailers per week\nOld Dominion - drops trailers every few days\nTforce - delivers once every couple of weeks', doNotUse: '', notes: '' },
   twin_cities: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Appt Hours: M-F 3am-9am\nEmail: TWCAppts@unfi.com', preferredCarriers: 'Estes', doNotUse: '', notes: '' },
   lancaster: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Appt by Email: lancasterappts@unfi.com\nPhone: (972) 228-5000 x52741', preferredCarriers: '', doNotUse: '', notes: '' },
-  carlisle: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Appt requests: myunfi.com\nEmail: CRLAppts@unfi.com\nConfirmations from: tmsapp@unfi.com\nReschedule must be 24+ hrs before delivery', preferredCarriers: '', doNotUse: '', notes: '' },
+  carlisle: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Appt requests: myunfi.com\nEmail: CRLAppts@unfi.com\nAppointment Hours: M-F 6am-12pm\nConfirmations from: tmsapp@unfi.com\nReschedule must be 24+ hrs before delivery', preferredCarriers: 'Tforce - drops trailer every other week on average\nEstes - drops trailers avg every 5-10 days\nXPO - live unloads, freight typically delivers 3-7 days after arrival at destination terminal\nOld Dominion - drops trailers every few days', doNotUse: 'R&L - does not deliver\nForward Air - does not deliver\nSAIA - still not sure, will keep calling', notes: '' },
   thrive_batesville: { type: 'unishippers', transitTime: 'LTL 4-7 days / UPS 4 days', deliveryInstructions: 'Appointments available 6am to 1pm (Eastern Standard Time)\nCall 812-932-0790 option 2 or email Batesville.Receiving@thrivemarket.com\nDeliveries must be scheduled 72 hours in advance\nDeliveries are made in the rear of the building, approximately dock door 44', preferredCarriers: 'FedEx Freight\nOld Dominion\nEstes\nTforce\nHolland\nYRC\nDayton Freight Lines', doNotUse: 'XPO\nDhorn\nUSPS is not allowed', notes: '' },
   thrive_reno: { type: 'unishippers', transitTime: 'LTL 2-3 days / UPS 3 days', deliveryInstructions: 'Appt req 6am-2pm PT M-Fr\nCall (775) 372-9077 or email Reno.Receiving@thrivemarket.com', preferredCarriers: 'SAIA\nDHE\nFedEx Freight\nUPS Ground', doNotUse: 'YRC\nABF\nOld Dominion\nTForce\nUSPS is not allowed', notes: '' },
   thrive_hanover: { type: 'unishippers', transitTime: 'LTL 5-6 days / UPS 4 days', deliveryInstructions: '(570) 260-1990\nhanover.Receiving@thrivemarket.com', preferredCarriers: 'Tforce\nOld Dominion\nFedEx Freight\nNew Penn\nPitt Ohio\nWard', doNotUse: 'XPO\nEstes\nUSPS is not allowed', notes: '' },
@@ -5249,7 +5249,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.07</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.07b</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
