@@ -137,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.07b</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.16a</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -3614,6 +3614,7 @@ const SHIPPING_INSTRUCTIONS = {
   sierra_tjx: { type: 'fob_pickup', notes: 'TJX/Sierra arranges their own pick-up. Create internal BOL.' },
   homegoods: { type: 'fob_pickup', notes: 'HomeGoods arranges their own pick-up. Create internal BOL.' },
   grocery_outlet: { type: 'fob_pickup', notes: 'Grocery Outlet Inbound Traffic coordinates First Mile logistics. Pick Up at Pan\'s. BOL needed.' },
+  market_of_choice: { type: 'fob_pickup', notes: 'Market of Choice pickup. Contact: Dan or Vern (541) 683-2834. Delivery to MCDC Warehouse, 1150 Owen Loop South, Eugene OR 97402.' },
   foundation_foods: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Contact: 949.391.7660 ext 4 (Warehouse & Deliveries)\nEmail: Shipping@foundationfoods.com\nReceiving Hours: Mon-Thurs 9:30am-3:30pm\nNo deliveries on Fridays or weekends', preferredCarriers: '', doNotUse: '', notes: 'Send tracking info and shipment updates to Shipping@foundationfoods.com\nAll quantities on PO are in eaches (not cases)' }
 };
 
@@ -3641,6 +3642,7 @@ function matchShipToName(shipToName) {
   if (name.includes('sierra') || name.includes('tjx')) return 'sierra_tjx';
   if (name.includes('homegoods') || name.includes('home goods')) return 'homegoods';
   if (name.includes('grocery outlet')) return 'grocery_outlet';
+  if (name.includes('market of choice') || name.includes('mcdc')) return 'market_of_choice';
   return null;
 }
 
@@ -5249,7 +5251,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.07b</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.16a</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
