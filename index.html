@@ -137,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.16a</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.19a</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -434,10 +434,13 @@ function getLotsForFlavor(flavorName) {
   });
 }
 
-// Create a lot picker wrapper around a lot code input
+// Create a lot picker wrapper around a lot code input.
+// NOTE: We now attach the picker even when the registry is offline so the user
+// can see *something* and trigger a reload. When offline, the dropdown shows a
+// helpful message + reload button instead of silently not appearing.
 function wrapWithLotPicker(lotInputId, bbInputId, flavorName) {
   const lotInput = document.getElementById(lotInputId);
-  if (!lotInput || !registryConnected) return;
+  if (!lotInput) return;
 
   // Don't double-wrap
   if (lotInput.parentElement.classList.contains('lot-picker-wrap')) return;
@@ -461,8 +464,21 @@ function wrapWithLotPicker(lotInputId, bbInputId, flavorName) {
   wrapper.appendChild(dropdown);
 
   function buildDropdown() {
-    const lots = getLotsForFlavor(flavorName);
     dropdown.innerHTML = '';
+
+    // Surface registry status so the user knows why the list is empty
+    if (!registryConnected) {
+      dropdown.innerHTML =
+        '<div class="lot-picker-empty" style="line-height:1.5;">' +
+          '<div style="color:#991b1b;font-weight:600;margin-bottom:6px;">Registry offline</div>' +
+          '<div style="color:#475569;font-size:11px;margin-bottom:8px;">Lot data isn\'t loaded. You can still type a lot code manually.</div>' +
+          '<button type="button" onclick="loadRegistryLots().then(function(){var d=document.querySelectorAll(\'.lot-picker-dropdown.open\');d.forEach(function(x){x.classList.remove(\'open\');});});" ' +
+            'style="font-size:11px;padding:4px 10px;background:#2563eb;color:white;border:none;border-radius:4px;cursor:pointer;">Retry registry</button>' +
+        '</div>';
+      return;
+    }
+
+    const lots = getLotsForFlavor(flavorName);
 
     if (lots.length === 0) {
       dropdown.innerHTML = '<div class="lot-picker-empty">No active lots for ' + flavorName + '</div>';
@@ -512,9 +528,11 @@ function wrapWithLotPicker(lotInputId, bbInputId, flavorName) {
   });
 }
 
-// Auto-attach pickers after line items are rendered
+// Auto-attach pickers after line items are rendered.
+// We attach the picker button regardless of registry state so the user can see
+// an offline message + retry button. Only the line-item rendering must exist.
 function attachLotPickers() {
-  if (!registryConnected || !extractedPO) return;
+  if (!extractedPO) return;
 
   const po = extractedPO;
 
@@ -2384,13 +2402,13 @@ function displayMultiDC(po) {
   });
   setTimeout(attachLotPickers, 100);
 
-  // === TJX Shipping Instructions Upload (HomeGoods only) ===
-  if (po.banner === 'HomeGoods') {
+  // === TJX Shipping Instructions Upload (HomeGoods, TJ Maxx, Marshalls, generic TJX) ===
+  if (po.banner === 'HomeGoods' || po.banner === 'TJ Maxx' || po.banner === 'Marshalls' || po.banner === 'TJX') {
     const tjxSection = document.createElement('div');
     tjxSection.style.cssText = 'margin-top:24px; padding:20px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px;';
     tjxSection.innerHTML =
-      '<div style="font-weight:700; font-size:15px; margin-bottom:8px;">TJX Shipping Instructions</div>' +
-      '<p style="font-size:13px; color:#555; margin-bottom:12px;">Upload the TJX shipping email PDF to auto-generate BOLs for each DC with carrier info, load ID, and delivery order numbers.</p>' +
+      '<div style="font-weight:700; font-size:15px; margin-bottom:8px;">' + po.banner + ' Shipping Instructions → BOL</div>' +
+      '<p style="font-size:13px; color:#555; margin-bottom:12px;">Upload the TJX shipping email PDF (the one with Load ID and the delivery-order table) to auto-generate BOLs for each DC. Works for HomeGoods, TJ Maxx, and Marshalls — only DOs whose PO matches the loaded PO will be used.</p>' +
       '<div id="tjxDropZone" style="border:2px dashed #93c5fd; border-radius:8px; padding:24px; text-align:center; cursor:pointer; background:#f0f7ff;">' +
         '<div style="font-weight:600; color:#1e40af;">Drop TJX Shipping Email PDF here or click to browse</div>' +
         '<input type="file" id="tjxFileInput" accept=".pdf" style="display:none">' +
@@ -2501,10 +2519,30 @@ async function handleTJXShippingPDF(file) {
         '</table>' +
       '</div>';
 
+    // Count how many DOs match the loaded PO (so the button reflects what'll actually be generated)
+    var matchedCount = 0;
+    if (extractedPO && extractedPO.shipments) {
+      for (var s = 0; s < extractedPO.shipments.length; s++) {
+        var shipDigits = (extractedPO.shipments[s].dc_po || '').replace(/\D/g, '');
+        if (!shipDigits) continue;
+        for (var d = 0; d < tjxShippingData.deliveryOrders.length; d++) {
+          var dOrder = tjxShippingData.deliveryOrders[d];
+          if (shipDigits === (dOrder.poPrefix + dOrder.basePO)) { matchedCount++; break; }
+        }
+      }
+    }
+    var totalDOs = tjxShippingData.deliveryOrders.length;
+    var label = matchedCount > 0
+      ? 'Generate BOLs for this PO (' + matchedCount + ' DC' + (matchedCount === 1 ? '' : 's') + ')'
+      : 'Generate All BOLs (' + totalDOs + ' DCs)';
+    if (matchedCount > 0 && matchedCount < totalDOs) {
+      label += ' — ' + (totalDOs - matchedCount) + ' other DO' + ((totalDOs - matchedCount) === 1 ? '' : 's') + ' in this email skipped (different PO)';
+    }
+
     // Show Generate BOLs button
     const btnEl = document.getElementById('tjxBOLButtons');
     btnEl.style.display = 'block';
-    btnEl.innerHTML = '<button onclick="generateAllHomeGoodsBOLs()" class="btn btn-primary" style="padding:10px 24px; font-size:14px;">Generate All BOLs (' + tjxShippingData.deliveryOrders.length + ' DCs)</button>';
+    btnEl.innerHTML = '<button onclick="generateAllTJXBOLs()" class="btn btn-primary" style="padding:10px 24px; font-size:14px;">' + label + '</button>';
 
   } catch (err) {
     statusEl.textContent = 'Error parsing PDF: ' + err.message;
@@ -2543,35 +2581,54 @@ function parseTJXShippingEmail(text) {
 
   // Parse delivery order table
   // Format: "16396168  10639836HMG 0  215  0  142  1  N"
-  // PO numbers are like "X0639836HMG" where X is the DC prefix (10, 20, 30, etc.)
-  var doPattern = /(\d{8})\s+(\d+HMG)\s*\d*\s+(\d+)\s+/g;
+  // Format: "16513148  10127036TJM 0  115  142  1  N"
+  // Format: "16513254  01127035MAR 0  110  142  1  N"
+  // PO numbers are "XX######BBB" where XX = DC prefix (2 digits), ###### = base PO, BBB = banner code (HMG|TJM|MAR)
+  var doPattern = /(\d{8})\s+(\d+(?:HMG|TJM|MAR))\s*\d*\s+(\d+)\s+/g;
   var deliveryOrders = [];
   var doMatch;
   while ((doMatch = doPattern.exec(text)) !== null) {
     var doNumber = doMatch[1];
-    var poRaw = doMatch[2]; // e.g. "10639836HMG"
+    var poRaw = doMatch[2]; // e.g. "10639836HMG", "40127036TJM", "01127035MAR"
     var cases = parseInt(doMatch[3]);
 
-    // Extract DC prefix from PO: first 2 digits map to DC prefix
-    // "10639836HMG" → prefix "10", base PO "639836"
-    var poPrefixMatch = poRaw.match(/^(\d{2})(\d+)HMG$/i);
+    // Extract DC prefix, base PO, banner code
+    // "10639836HMG" → prefix "10", base "639836", code "HMG"
+    var poPrefixMatch = poRaw.match(/^(\d{2})(\d+)(HMG|TJM|MAR)$/i);
     var dcPrefix = '';
     var basePO = '';
+    var bannerCode = '';
     if (poPrefixMatch) {
       dcPrefix = poPrefixMatch[1];
       basePO = poPrefixMatch[2];
+      bannerCode = poPrefixMatch[3].toUpperCase();
     }
 
-    // Look up DC name from extractedPO shipments
+    // Match this DO to a DC in the loaded PO. Prefer a full prefix+basePO digit match
+    // (so a HMG/TJM/MAR mixed email doesn't cross-match). Fall back to prefix-only if needed.
     var dcName = '';
     var dcCode = '';
     if (extractedPO && extractedPO.shipments) {
+      var fullDigits = dcPrefix + basePO; // e.g. "10127036"
+      // First pass: exact digit match
       for (var s = 0; s < extractedPO.shipments.length; s++) {
         var shipment = extractedPO.shipments[s];
-        if (shipment.dc_po && shipment.dc_po.indexOf(dcPrefix) === 0) {
+        var shipDigits = (shipment.dc_po || '').replace(/\D/g, '');
+        if (shipDigits && shipDigits === fullDigits) {
           dcName = shipment.ship_name;
           dcCode = shipment.dc_code || '';
           break;
+        }
+      }
+      // Fallback: legacy prefix-only match (kept for backward compatibility)
+      if (!dcName) {
+        for (var s = 0; s < extractedPO.shipments.length; s++) {
+          var shipment = extractedPO.shipments[s];
+          if (shipment.dc_po && shipment.dc_po.indexOf(dcPrefix) === 0) {
+            dcName = shipment.ship_name;
+            dcCode = shipment.dc_code || '';
+            break;
+          }
         }
       }
     }
@@ -2581,6 +2638,7 @@ function parseTJXShippingEmail(text) {
       poNumber: poRaw,
       poPrefix: dcPrefix,
       basePO: basePO,
+      bannerCode: bannerCode,
       cases: cases,
       dcName: dcName,
       dcCode: dcCode
@@ -2600,9 +2658,10 @@ function parseTJXShippingEmail(text) {
   };
 }
 
-function generateAllHomeGoodsBOLs() {
+// Banner-aware: works for HomeGoods, TJ Maxx, Marshalls, or generic TJX.
+function generateAllTJXBOLs() {
   if (!tjxShippingData || !extractedPO || !extractedPO.shipments) {
-    alert('Please load both the HomeGoods PO and TJX shipping instructions first.');
+    alert('Please load both the PO and the TJX shipping instructions first.');
     return;
   }
 
@@ -2610,36 +2669,55 @@ function generateAllHomeGoodsBOLs() {
   var tjx = tjxShippingData;
   var { jsPDF } = window.jspdf;
   var filesCreated = 0;
+  var skipped = 0;
+
+  // Sanitize banner for filename (no spaces/periods)
+  var bannerSlug = (po.banner || 'TJX').replace(/[^A-Za-z0-9]/g, '');
 
   for (var s = 0; s < po.shipments.length; s++) {
     var shipment = po.shipments[s];
 
-    // Find matching delivery order by DC PO prefix
+    // Find matching delivery order. Prefer full digit match; fall back to prefix-only.
+    var shipDigits = (shipment.dc_po || '').replace(/\D/g, '');
     var deliveryOrder = null;
-    for (var d = 0; d < tjx.deliveryOrders.length; d++) {
-      var dOrder = tjx.deliveryOrders[d];
-      if (shipment.dc_po && shipment.dc_po.indexOf(dOrder.poPrefix) === 0) {
-        deliveryOrder = dOrder;
-        break;
+    if (shipDigits) {
+      for (var d = 0; d < tjx.deliveryOrders.length; d++) {
+        var dOrder = tjx.deliveryOrders[d];
+        if (shipDigits === (dOrder.poPrefix + dOrder.basePO)) { deliveryOrder = dOrder; break; }
       }
     }
+    if (!deliveryOrder) {
+      for (var d = 0; d < tjx.deliveryOrders.length; d++) {
+        var dOrder = tjx.deliveryOrders[d];
+        if (shipment.dc_po && shipment.dc_po.indexOf(dOrder.poPrefix) === 0) { deliveryOrder = dOrder; break; }
+      }
+    }
+    if (!deliveryOrder) { skipped++; continue; } // no matching DO in this shipping email
 
     var doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' });
-    drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po);
+    drawTJXBOL(doc, shipment, deliveryOrder, tjx, po);
 
     // Build filename
     var dcLabel = (shipment.dc_code || shipment.ship_name.split('#')[1] || s).toString().trim();
     var shortName = shipment.ship_name.match(/-\s*(\w+)/);
     shortName = shortName ? shortName[1] : dcLabel;
-    var fn = 'BOL_HomeGoods_DC' + dcLabel + '_' + shortName + '_PO' + (shipment.dc_po || po.po_number).replace(/\s+/g, '_') + '.pdf';
+    var fn = 'BOL_' + bannerSlug + '_DC' + dcLabel + '_' + shortName + '_PO' + (shipment.dc_po || po.po_number).replace(/\s+/g, '_') + '.pdf';
     doc.save(fn);
     filesCreated++;
   }
 
-  showStatus('tjxStatus', 'Created ' + filesCreated + ' BOL PDFs', 'success');
+  var msg = 'Created ' + filesCreated + ' BOL PDF' + (filesCreated === 1 ? '' : 's');
+  if (skipped > 0) msg += ' (' + skipped + ' DC' + (skipped === 1 ? '' : 's') + ' had no matching DO in the email — skipped)';
+  showStatus('tjxStatus', msg, filesCreated > 0 ? 'success' : 'error');
 }
 
-function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) {
+// Backward-compat alias in case any old code paths still call the HomeGoods-named function.
+function generateAllHomeGoodsBOLs() { return generateAllTJXBOLs(); }
+
+// Backward-compat alias.
+function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) { return drawTJXBOL(doc, shipment, deliveryOrder, tjx, po); }
+
+function drawTJXBOL(doc, shipment, deliveryOrder, tjx, po) {
   var W = 612, H = 792;
   var M = 36; // margin
   var R = W - M;
@@ -2670,7 +2748,8 @@ function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) {
   y += 14;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text('Straight Bill of Lading \u2014 Short Form \u2014 Not Negotiable', midX, y, { align: 'center' });
+  var bannerLabel = (po.banner && po.banner !== 'TJX') ? (po.banner + ' \u2014 ') : '';
+  doc.text(bannerLabel + 'Straight Bill of Lading \u2014 Short Form \u2014 Not Negotiable', midX, y, { align: 'center' });
   y += 18;
 
   // === TOP INFO BAR ===
@@ -5251,7 +5330,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.16a</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.19a</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
