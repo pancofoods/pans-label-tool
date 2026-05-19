@@ -137,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.19c</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.19d</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -2969,13 +2969,13 @@ function drawTJXBOL(doc, shipment, deliveryOrder, tjx, po) {
   y += sumH + 12;
 
   // === SPECIAL INSTRUCTIONS ===
+  // Rules from the TJX shipping email + handling note from shipper.
   var instructions = [
-    'TJX Load ID: ' + (tjx.loadId || '') + '  |  Pickup Date: ' + pickupDate + '  |  Terms: 3rd Party Collect to TJX',
+    'TJX Load ID: ' + (tjx.loadId || '') + '  |  Pickup Date: ' + pickupDate + '  |  Terms: 3rd Party Collect to TJX.',
     'Carrier contacts vendor to schedule pickup.',
-    'All pallets must be loaded using the pinwheeled method.',
-    'Pallets must be built to 7ft high (4ft for double-stacked).',
-    'Multiple destinations cannot be combined on the same pallet.',
-    'Must schedule appointment and load within two hours of appointment time.'
+    '1 Load ID = 1 BOL. Do not separate BOLs per PO.',
+    'BOL destination address must match the consignee address listed above.',
+    '*** DO NOT STACK ***'
   ];
   var instH = 16 + instructions.length * 11 + 4;
   doc.setLineWidth(0.5);
@@ -2987,8 +2987,22 @@ function drawTJXBOL(doc, shipment, deliveryOrder, tjx, po) {
   doc.setFontSize(8);
   var ily = y + 24;
   for (var ins = 0; ins < instructions.length; ins++) {
-    doc.text(instructions[ins], M + 6, ily);
-    ily += 11;
+    var line = instructions[ins];
+    var isStackWarn = /DO NOT STACK/i.test(line);
+    if (isStackWarn) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(200, 0, 0);
+    }
+    doc.text(line, M + 6, ily);
+    if (isStackWarn) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(0, 0, 0);
+      ily += 13;
+    } else {
+      ily += 11;
+    }
   }
   y += instH + 14;
 
@@ -5400,7 +5414,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.19c</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.19d</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
