@@ -137,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.19d</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.21a</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -424,62 +424,20 @@ function updateRegistryStatus(state) {
   }
 }
 
-// Format a Best-By date for display + label printing.
-// The registry can return: ISO timestamps ("2027-02-19T08:00:00.000Z"),
-// "YYYY-MM-DD", "M/D/YY", or already-formatted MM/DD/YY. Normalize all of
-// those to MM/DD/YY (which is what the label templates and placeholders use).
-function formatBBDate(raw) {
-  if (!raw) return '';
-  var s = String(raw).trim();
-  if (!s) return '';
-
-  // Already MM/DD/YY or M/D/YY → normalize to MM/DD/YY
-  var slashMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-  if (slashMatch) {
-    var mm = slashMatch[1].padStart(2, '0');
-    var dd = slashMatch[2].padStart(2, '0');
-    var yy = slashMatch[3].length === 4 ? slashMatch[3].slice(2) : slashMatch[3].padStart(2, '0');
-    return mm + '/' + dd + '/' + yy;
-  }
-
-  // ISO timestamp or YYYY-MM-DD → parse as UTC to avoid TZ off-by-one
-  var isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (isoMatch) {
-    var yyyy = isoMatch[1];
-    var mm = isoMatch[2];
-    var dd = isoMatch[3];
-    return mm + '/' + dd + '/' + yyyy.slice(2);
-  }
-
-  // Last resort: let Date parse it
-  var d = new Date(s);
-  if (!isNaN(d.getTime())) {
-    var mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-    var dd = String(d.getUTCDate()).padStart(2, '0');
-    var yy = String(d.getUTCFullYear()).slice(2);
-    return mm + '/' + dd + '/' + yy;
-  }
-
-  return s; // unrecognized — leave alone
-}
-
 // Get lots filtered by flavor
 function getLotsForFlavor(flavorName) {
   const abbrev = FLAVOR_TO_ABBREV[flavorName];
   if (!abbrev) return [];
   const size = (flavorName.includes('1oz')) ? '1oz' : '2.2oz';
   return registryLots.filter(function(lot) {
-    return lot.flavor === abbrev && lot.size === size && (lot.qtyRemaining > 0 || lot.status === 'In Progress');
+    return lot.flavor === abbrev && lot.size === size && lot.qtyRemaining > 0;
   });
 }
 
-// Create a lot picker wrapper around a lot code input.
-// NOTE: We now attach the picker even when the registry is offline so the user
-// can see *something* and trigger a reload. When offline, the dropdown shows a
-// helpful message + reload button instead of silently not appearing.
+// Create a lot picker wrapper around a lot code input
 function wrapWithLotPicker(lotInputId, bbInputId, flavorName) {
   const lotInput = document.getElementById(lotInputId);
-  if (!lotInput) return;
+  if (!lotInput || !registryConnected) return;
 
   // Don't double-wrap
   if (lotInput.parentElement.classList.contains('lot-picker-wrap')) return;
@@ -503,21 +461,8 @@ function wrapWithLotPicker(lotInputId, bbInputId, flavorName) {
   wrapper.appendChild(dropdown);
 
   function buildDropdown() {
-    dropdown.innerHTML = '';
-
-    // Surface registry status so the user knows why the list is empty
-    if (!registryConnected) {
-      dropdown.innerHTML =
-        '<div class="lot-picker-empty" style="line-height:1.5;">' +
-          '<div style="color:#991b1b;font-weight:600;margin-bottom:6px;">Registry offline</div>' +
-          '<div style="color:#475569;font-size:11px;margin-bottom:8px;">Lot data isn\'t loaded. You can still type a lot code manually.</div>' +
-          '<button type="button" onclick="loadRegistryLots().then(function(){var d=document.querySelectorAll(\'.lot-picker-dropdown.open\');d.forEach(function(x){x.classList.remove(\'open\');});});" ' +
-            'style="font-size:11px;padding:4px 10px;background:#2563eb;color:white;border:none;border-radius:4px;cursor:pointer;">Retry registry</button>' +
-        '</div>';
-      return;
-    }
-
     const lots = getLotsForFlavor(flavorName);
+    dropdown.innerHTML = '';
 
     if (lots.length === 0) {
       dropdown.innerHTML = '<div class="lot-picker-empty">No active lots for ' + flavorName + '</div>';
@@ -529,29 +474,20 @@ function wrapWithLotPicker(lotInputId, bbInputId, flavorName) {
       item.className = 'lot-picker-item';
 
       const c = LOT_COLORS[lot.flavor] || { bg: '#f1f5f9', text: '#475569' };
-      const isIP = lot.status === 'In Progress';
-      const pct = lot.qtyProduced > 0 ? Math.round((lot.qtyRemaining / lot.qtyProduced) * 100) : 100;
-      const lowClass = !isIP && pct < 15 ? ' low' : '';
+      const pct = Math.round((lot.qtyRemaining / lot.qtyProduced) * 100);
+      const lowClass = pct < 15 ? ' low' : '';
 
-      var bbFormatted = formatBBDate(lot.bbDate);
-      var remainingText = isIP
-        ? '<span style="font-size:9px;color:#0369a1;font-weight:bold">IN PROGRESS</span>'
-        : '<span class="lot-remaining' + lowClass + '">' + lot.qtyRemaining.toLocaleString() + ' left</span>';
       item.innerHTML =
         '<span class="lot-flavor" style="background:' + c.bg + ';color:' + c.text + '">' + lot.flavor + '</span>' +
         '<span class="lot-code">#' + lot.lotCode + '</span>' +
-        '<span class="lot-bb">BB: ' + bbFormatted + '</span>' +
-        remainingText;
+        '<span class="lot-bb">BB: ' + lot.bbDate + '</span>' +
+        '<span class="lot-remaining' + lowClass + '">' + lot.qtyRemaining.toLocaleString() + ' left</span>';
 
       item.addEventListener('click', function() {
         lotInput.value = lot.lotCode;
         if (bbInputId) {
           const bbInput = document.getElementById(bbInputId);
-          if (bbInput) {
-            bbInput.value = bbFormatted;
-            // Trigger oninput on the BB input too, in case anything listens
-            bbInput.dispatchEvent(new Event('input', { bubbles: true }));
-          }
+          if (bbInput) bbInput.value = lot.bbDate;
         }
         dropdown.classList.remove('open');
         // Trigger any existing oninput handlers
@@ -576,11 +512,9 @@ function wrapWithLotPicker(lotInputId, bbInputId, flavorName) {
   });
 }
 
-// Auto-attach pickers after line items are rendered.
-// We attach the picker button regardless of registry state so the user can see
-// an offline message + retry button. Only the line-item rendering must exist.
+// Auto-attach pickers after line items are rendered
 function attachLotPickers() {
-  if (!extractedPO) return;
+  if (!registryConnected || !extractedPO) return;
 
   const po = extractedPO;
 
@@ -1003,6 +937,8 @@ function expandLots(prefix, idx, totalQty, isDC) {
     var dcNum = prefix.replace('_', '');
     palletPrefix = '_dc' + dcNum;
   }
+  // Actually rebuild the pallet assignment with updated lot quantities
+  setTimeout(function() { buildPalletAssignment(palletPrefix); }, 150);
 }
 
 // Auto-adjust other lot quantities when one changes (for 2-lot split)
@@ -1043,6 +979,14 @@ function adjustLotQty(prefix, idx, changedLot, totalQty, lotsCount) {
   }
   updateLotSummary(prefix, idx, totalQty);
 
+  // Rebuild pallet assignment with updated lot quantities (debounced)
+  var palletPrefix = '';
+  if (prefix && prefix.endsWith('_')) {
+    var dcNum = prefix.replace('_', '');
+    palletPrefix = '_dc' + dcNum;
+  }
+  if (_palletRefreshTimer) clearTimeout(_palletRefreshTimer);
+  _palletRefreshTimer = setTimeout(function() { buildPalletAssignment(palletPrefix); }, 300);
 }
 
 // Update the lot code summary text for spreadsheet copy
@@ -2450,13 +2394,13 @@ function displayMultiDC(po) {
   });
   setTimeout(attachLotPickers, 100);
 
-  // === TJX Shipping Instructions Upload (HomeGoods, TJ Maxx, Marshalls, generic TJX) ===
-  if (po.banner === 'HomeGoods' || po.banner === 'TJ Maxx' || po.banner === 'Marshalls' || po.banner === 'TJX') {
+  // === TJX Shipping Instructions Upload (HomeGoods only) ===
+  if (po.banner === 'HomeGoods') {
     const tjxSection = document.createElement('div');
     tjxSection.style.cssText = 'margin-top:24px; padding:20px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px;';
     tjxSection.innerHTML =
-      '<div style="font-weight:700; font-size:15px; margin-bottom:8px;">' + po.banner + ' Shipping Instructions → BOL</div>' +
-      '<p style="font-size:13px; color:#555; margin-bottom:12px;">Upload the TJX shipping email PDF (the one with Load ID and the delivery-order table) to auto-generate BOLs for each DC. Works for HomeGoods, TJ Maxx, and Marshalls — only DOs whose PO matches the loaded PO will be used.</p>' +
+      '<div style="font-weight:700; font-size:15px; margin-bottom:8px;">TJX Shipping Instructions</div>' +
+      '<p style="font-size:13px; color:#555; margin-bottom:12px;">Upload the TJX shipping email PDF to auto-generate BOLs for each DC with carrier info, load ID, and delivery order numbers.</p>' +
       '<div id="tjxDropZone" style="border:2px dashed #93c5fd; border-radius:8px; padding:24px; text-align:center; cursor:pointer; background:#f0f7ff;">' +
         '<div style="font-weight:600; color:#1e40af;">Drop TJX Shipping Email PDF here or click to browse</div>' +
         '<input type="file" id="tjxFileInput" accept=".pdf" style="display:none">' +
@@ -2562,44 +2506,15 @@ async function handleTJXShippingPDF(file) {
         '<table style="width:100%; margin-top:4px; font-size:12px; border-collapse:collapse;">' +
         '<tr style="background:#f3f4f6;"><th style="padding:4px 8px; text-align:left;">DO #</th><th style="padding:4px 8px; text-align:left;">PO</th><th style="padding:4px 8px; text-align:left;">DC</th><th style="padding:4px 8px; text-align:right;">Cases</th></tr>' +
         tjxShippingData.deliveryOrders.map(function(d) {
-          var dcCell;
-          if (d.dcName || d.dcCode) {
-            dcCell = d.dcName || d.dcCode;
-          } else {
-            // No match against the loaded PO — show the banner so it's clear why
-            var bannerNames = { TJM: 'TJ Maxx', MAR: 'Marshalls', HMG: 'HomeGoods' };
-            var bn = bannerNames[d.bannerCode] || d.bannerCode || 'Unknown';
-            dcCell = '<span style="color:#94a3b8;">' + bn + ' — different PO, skipped (load the ' + bn + ' PO separately to generate)</span>';
-          }
-          return '<tr><td style="padding:4px 8px;">' + d.doNumber + '</td><td style="padding:4px 8px;">' + d.poNumber + '</td><td style="padding:4px 8px;">' + dcCell + '</td><td style="padding:4px 8px; text-align:right;">' + d.cases + '</td></tr>';
+          return '<tr><td style="padding:4px 8px;">' + d.doNumber + '</td><td style="padding:4px 8px;">' + d.poNumber + '</td><td style="padding:4px 8px;">' + (d.dcName || d.dcCode || '?') + '</td><td style="padding:4px 8px; text-align:right;">' + d.cases + '</td></tr>';
         }).join('') +
         '</table>' +
       '</div>';
 
-    // Count how many DOs match the loaded PO (so the button reflects what'll actually be generated)
-    var matchedCount = 0;
-    if (extractedPO && extractedPO.shipments) {
-      for (var s = 0; s < extractedPO.shipments.length; s++) {
-        var shipDigits = (extractedPO.shipments[s].dc_po || '').replace(/\D/g, '');
-        if (!shipDigits) continue;
-        for (var d = 0; d < tjxShippingData.deliveryOrders.length; d++) {
-          var dOrder = tjxShippingData.deliveryOrders[d];
-          if (shipDigits === (dOrder.poPrefix + dOrder.basePO)) { matchedCount++; break; }
-        }
-      }
-    }
-    var totalDOs = tjxShippingData.deliveryOrders.length;
-    var label = matchedCount > 0
-      ? 'Generate BOLs for this PO (' + matchedCount + ' DC' + (matchedCount === 1 ? '' : 's') + ')'
-      : 'Generate All BOLs (' + totalDOs + ' DCs)';
-    if (matchedCount > 0 && matchedCount < totalDOs) {
-      label += ' — ' + (totalDOs - matchedCount) + ' other DO' + ((totalDOs - matchedCount) === 1 ? '' : 's') + ' in this email skipped (different PO)';
-    }
-
     // Show Generate BOLs button
     const btnEl = document.getElementById('tjxBOLButtons');
     btnEl.style.display = 'block';
-    btnEl.innerHTML = '<button onclick="generateAllTJXBOLs()" class="btn btn-primary" style="padding:10px 24px; font-size:14px;">' + label + '</button>';
+    btnEl.innerHTML = '<button onclick="generateAllHomeGoodsBOLs()" class="btn btn-primary" style="padding:10px 24px; font-size:14px;">Generate All BOLs (' + tjxShippingData.deliveryOrders.length + ' DCs)</button>';
 
   } catch (err) {
     statusEl.textContent = 'Error parsing PDF: ' + err.message;
@@ -2638,54 +2553,35 @@ function parseTJXShippingEmail(text) {
 
   // Parse delivery order table
   // Format: "16396168  10639836HMG 0  215  0  142  1  N"
-  // Format: "16513148  10127036TJM 0  115  142  1  N"
-  // Format: "16513254  01127035MAR 0  110  142  1  N"
-  // PO numbers are "XX######BBB" where XX = DC prefix (2 digits), ###### = base PO, BBB = banner code (HMG|TJM|MAR)
-  var doPattern = /(\d{8})\s+(\d+(?:HMG|TJM|MAR))\s*\d*\s+(\d+)\s+/g;
+  // PO numbers are like "X0639836HMG" where X is the DC prefix (10, 20, 30, etc.)
+  var doPattern = /(\d{8})\s+(\d+HMG)\s*\d*\s+(\d+)\s+/g;
   var deliveryOrders = [];
   var doMatch;
   while ((doMatch = doPattern.exec(text)) !== null) {
     var doNumber = doMatch[1];
-    var poRaw = doMatch[2]; // e.g. "10639836HMG", "40127036TJM", "01127035MAR"
+    var poRaw = doMatch[2]; // e.g. "10639836HMG"
     var cases = parseInt(doMatch[3]);
 
-    // Extract DC prefix, base PO, banner code
-    // "10639836HMG" → prefix "10", base "639836", code "HMG"
-    var poPrefixMatch = poRaw.match(/^(\d{2})(\d+)(HMG|TJM|MAR)$/i);
+    // Extract DC prefix from PO: first 2 digits map to DC prefix
+    // "10639836HMG" → prefix "10", base PO "639836"
+    var poPrefixMatch = poRaw.match(/^(\d{2})(\d+)HMG$/i);
     var dcPrefix = '';
     var basePO = '';
-    var bannerCode = '';
     if (poPrefixMatch) {
       dcPrefix = poPrefixMatch[1];
       basePO = poPrefixMatch[2];
-      bannerCode = poPrefixMatch[3].toUpperCase();
     }
 
-    // Match this DO to a DC in the loaded PO. Prefer a full prefix+basePO digit match
-    // (so a HMG/TJM/MAR mixed email doesn't cross-match). Fall back to prefix-only if needed.
+    // Look up DC name from extractedPO shipments
     var dcName = '';
     var dcCode = '';
     if (extractedPO && extractedPO.shipments) {
-      var fullDigits = dcPrefix + basePO; // e.g. "10127036"
-      // First pass: exact digit match
       for (var s = 0; s < extractedPO.shipments.length; s++) {
         var shipment = extractedPO.shipments[s];
-        var shipDigits = (shipment.dc_po || '').replace(/\D/g, '');
-        if (shipDigits && shipDigits === fullDigits) {
+        if (shipment.dc_po && shipment.dc_po.indexOf(dcPrefix) === 0) {
           dcName = shipment.ship_name;
           dcCode = shipment.dc_code || '';
           break;
-        }
-      }
-      // Fallback: legacy prefix-only match (kept for backward compatibility)
-      if (!dcName) {
-        for (var s = 0; s < extractedPO.shipments.length; s++) {
-          var shipment = extractedPO.shipments[s];
-          if (shipment.dc_po && shipment.dc_po.indexOf(dcPrefix) === 0) {
-            dcName = shipment.ship_name;
-            dcCode = shipment.dc_code || '';
-            break;
-          }
         }
       }
     }
@@ -2695,7 +2591,6 @@ function parseTJXShippingEmail(text) {
       poNumber: poRaw,
       poPrefix: dcPrefix,
       basePO: basePO,
-      bannerCode: bannerCode,
       cases: cases,
       dcName: dcName,
       dcCode: dcCode
@@ -2715,74 +2610,46 @@ function parseTJXShippingEmail(text) {
   };
 }
 
-// Banner-aware: works for HomeGoods, TJ Maxx, Marshalls, or generic TJX.
-function generateAllTJXBOLs() {
+function generateAllHomeGoodsBOLs() {
   if (!tjxShippingData || !extractedPO || !extractedPO.shipments) {
-    alert('Please load both the PO and the TJX shipping instructions first.');
+    alert('Please load both the HomeGoods PO and TJX shipping instructions first.');
     return;
   }
 
   var po = extractedPO;
   var tjx = tjxShippingData;
   var { jsPDF } = window.jspdf;
-  var pagesAdded = 0;
-  var skipped = 0;
-  var doc = null;
-
-  // Sanitize banner for filename (no spaces/periods)
-  var bannerSlug = (po.banner || 'TJX').replace(/[^A-Za-z0-9]/g, '');
+  var filesCreated = 0;
 
   for (var s = 0; s < po.shipments.length; s++) {
     var shipment = po.shipments[s];
 
-    // Find matching delivery order. Prefer full digit match; fall back to prefix-only.
-    var shipDigits = (shipment.dc_po || '').replace(/\D/g, '');
+    // Find matching delivery order by DC PO prefix
     var deliveryOrder = null;
-    if (shipDigits) {
-      for (var d = 0; d < tjx.deliveryOrders.length; d++) {
-        var dOrder = tjx.deliveryOrders[d];
-        if (shipDigits === (dOrder.poPrefix + dOrder.basePO)) { deliveryOrder = dOrder; break; }
+    for (var d = 0; d < tjx.deliveryOrders.length; d++) {
+      var dOrder = tjx.deliveryOrders[d];
+      if (shipment.dc_po && shipment.dc_po.indexOf(dOrder.poPrefix) === 0) {
+        deliveryOrder = dOrder;
+        break;
       }
     }
-    if (!deliveryOrder) {
-      for (var d = 0; d < tjx.deliveryOrders.length; d++) {
-        var dOrder = tjx.deliveryOrders[d];
-        if (shipment.dc_po && shipment.dc_po.indexOf(dOrder.poPrefix) === 0) { deliveryOrder = dOrder; break; }
-      }
-    }
-    if (!deliveryOrder) { skipped++; continue; } // no matching DO in this shipping email
 
-    // Combine all DCs into ONE multi-page PDF (one DC per page).
-    // Matches TJX's "1 Load ID = 1 BOL" rule AND avoids browsers blocking rapid downloads.
-    if (doc === null) {
-      doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' });
-    } else {
-      doc.addPage();
-    }
-    drawTJXBOL(doc, shipment, deliveryOrder, tjx, po);
-    pagesAdded++;
+    var doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' });
+    drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po);
+
+    // Build filename
+    var dcLabel = (shipment.dc_code || shipment.ship_name.split('#')[1] || s).toString().trim();
+    var shortName = shipment.ship_name.match(/-\s*(\w+)/);
+    shortName = shortName ? shortName[1] : dcLabel;
+    var fn = 'BOL_HomeGoods_DC' + dcLabel + '_' + shortName + '_PO' + (shipment.dc_po || po.po_number).replace(/\s+/g, '_') + '.pdf';
+    doc.save(fn);
+    filesCreated++;
   }
 
-  if (!doc) {
-    showStatus('tjxStatus', 'No matching delivery orders found for this PO in the shipping email.', 'error');
-    return;
-  }
-
-  var fn = 'BOL_' + bannerSlug + '_LoadID_' + (tjx.loadId || 'unknown') + '_PO' + (po.po_number || '').replace(/\s+/g, '_') + '_' + pagesAdded + 'pages.pdf';
-  doc.save(fn);
-
-  var msg = 'Created BOL PDF with ' + pagesAdded + ' page' + (pagesAdded === 1 ? '' : 's') + ' (one per DC).';
-  if (skipped > 0) msg += ' ' + skipped + ' DC' + (skipped === 1 ? '' : 's') + ' had no matching DO in this email — skipped.';
-  showStatus('tjxStatus', msg, 'success');
+  showStatus('tjxStatus', 'Created ' + filesCreated + ' BOL PDFs', 'success');
 }
 
-// Backward-compat alias in case any old code paths still call the HomeGoods-named function.
-function generateAllHomeGoodsBOLs() { return generateAllTJXBOLs(); }
-
-// Backward-compat alias.
-function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) { return drawTJXBOL(doc, shipment, deliveryOrder, tjx, po); }
-
-function drawTJXBOL(doc, shipment, deliveryOrder, tjx, po) {
+function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) {
   var W = 612, H = 792;
   var M = 36; // margin
   var R = W - M;
@@ -2813,8 +2680,7 @@ function drawTJXBOL(doc, shipment, deliveryOrder, tjx, po) {
   y += 14;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  var bannerLabel = (po.banner && po.banner !== 'TJX') ? (po.banner + ' \u2014 ') : '';
-  doc.text(bannerLabel + 'Straight Bill of Lading \u2014 Short Form \u2014 Not Negotiable', midX, y, { align: 'center' });
+  doc.text('Straight Bill of Lading \u2014 Short Form \u2014 Not Negotiable', midX, y, { align: 'center' });
   y += 18;
 
   // === TOP INFO BAR ===
@@ -2860,66 +2726,57 @@ function drawTJXBOL(doc, shipment, deliveryOrder, tjx, po) {
   }
 
   var y1 = drawBlock(col1X, col1W, 'SHIPPER:', [BOL_CONSTANTS.shipFrom.name, BOL_CONSTANTS.shipFrom.addr, BOL_CONSTANTS.shipFrom.csz]);
-  var y2 = drawBlock(col2X, col2W, 'CONSIGNEE:', [(tjx.consolidator && tjx.consolidator.name) || '', (tjx.consolidator && tjx.consolidator.addr) || '', (tjx.consolidator && tjx.consolidator.csz) || '']);
-  var y3 = drawBlock(col3X, col3W, 'CARRIER:', [tjx.carrier || '', tjx.carrierPhone ? 'Ph: ' + tjx.carrierPhone : '', tjx.carrierEmail ? 'Email: ' + tjx.carrierEmail : '']);
+  var y2 = drawBlock(col2X, col2W, 'CONSIGNEE:', [tjx.consolidator.name, tjx.consolidator.addr, tjx.consolidator.csz]);
+  var y3 = drawBlock(col3X, col3W, 'CARRIER:', [tjx.carrier, 'Ph: ' + tjx.carrierPhone, tjx.carrierEmail ? 'Email: ' + tjx.carrierEmail : '']);
 
-  // Bottom of the deepest column (drawBlock increments ly downward).
-  // Draw the three column boxes from the row's top to that bottom edge + a bit of padding.
-  y = Math.max(y1, y2, y3) + 4;
-  var blockTop = boxTop - 14; // label baseline was boxTop - 2; allow 12pt above for label rectangle
+  y = Math.min(y1, y2, y3) - 6;
   doc.setLineWidth(0.3);
-  doc.rect(col1X, blockTop, col1W, y - blockTop);
-  doc.rect(col2X, blockTop, col2W, y - blockTop);
-  doc.rect(col3X, blockTop, col3W, y - blockTop);
-  y += 10;
+  doc.rect(col1X, y, col1W, boxTop - y + 6);
+  doc.rect(col2X, y, col2W, boxTop - y + 6);
+  doc.rect(col3X, y, col3W, boxTop - y + 6);
+  y -= 16;
 
   // === FINAL DESTINATION (DC) ===
-  var destTop = y;
+  var destTop = y + 4;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  doc.text('FINAL DESTINATION (DC):', M + 4, y + 10);
+  doc.text('FINAL DESTINATION (DC):', M + 4, y);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text(shipment.ship_name || '', M + 140, y + 10);
-  doc.text(shipment.ship_addr || '', M + 140, y + 22);
-  doc.text(shipment.ship_csz  || '', M + 140, y + 34);
+  doc.text(shipment.ship_name, M + 140, y);
+  y -= 11;
+  doc.text(shipment.ship_addr || '', M + 140, y);
+  y -= 11;
+  doc.text(shipment.ship_csz || '', M + 140, y);
 
   // Delivery order on right
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  doc.text('DELIVERY ORDER #:', col3X + 4, y + 10);
+  doc.text('DELIVERY ORDER #:', col3X + 4, destTop);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  doc.text(doNumber || '', col3X + 4, y + 24);
+  doc.text(doNumber, col3X + 4, destTop - 13);
 
-  var destH = 44;
-  doc.setLineWidth(0.3);
-  doc.rect(M, destTop, R - M, destH);
-  y = destTop + destH + 10;
+  y -= 6;
+  doc.rect(M, y, R - M, destTop - y + 6);
+  y -= 18;
 
   // === ITEM TABLE ===
-  // Columns: QTY (Cases) | Units | SKU | TJX Style # | Description | Weight (lb)
-  // (matches the reference HomeGoods BOL we generated previously)
   var tableTop = y;
-  var rowH = 16;
-  var headerH = 16;
-  var colXs = [M + 4, M + 70, M + 120, M + 170, M + 230, M + 480];
-  var colLabels = ['QTY (Cases)', 'Units', 'SKU', 'TJX Style #', 'Description', 'Weight (lb)'];
+  var colXs = [M + 4, M + 70, M + 120, M + 190, M + 420];
+  var colLabels = ['QTY (Cases)', 'Units', 'SKU', 'Description', 'Weight (lb)'];
 
-  // Header
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   for (var c = 0; c < colLabels.length; c++) {
-    doc.text(colLabels[c], colXs[c], y + 11);
+    doc.text(colLabels[c], colXs[c], y);
   }
-  doc.setLineWidth(0.3);
-  doc.line(M, y + headerH, R, y + headerH);
-  y += headerH;
+  y -= 4;
+  doc.line(M, y, R, y);
+  y -= 12;
 
-  // Rows
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  var totalUnitsCalc = 0;
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     var product = PRODUCTS[item.flavor];
@@ -2927,37 +2784,36 @@ function drawTJXBOL(doc, shipment, deliveryOrder, tjx, po) {
     var units = item.qty * unitsPerCase;
     var weight = item.qty * caseWeightLb;
     var sku = product ? product.sku : '';
-    var tjxStyle = (deliveryOrder && deliveryOrder.tjxStyles && deliveryOrder.tjxStyles[item.flavor]) || '';
-    totalUnitsCalc += units;
 
-    doc.text('' + item.qty, colXs[0], y + 11);
-    doc.text('' + units, colXs[1], y + 11);
-    doc.text(sku, colXs[2], y + 11);
-    doc.text(tjxStyle, colXs[3], y + 11);
-    doc.text("Pan's Mushroom Jerky - " + item.flavor, colXs[4], y + 11);
-    doc.text('' + weight, colXs[5], y + 11);
-    y += rowH;
+    doc.text('' + item.qty, colXs[0], y);
+    doc.text('' + units, colXs[1], y);
+    doc.text(sku, colXs[2], y);
+    doc.text("Pan's Mushroom Jerky - " + item.flavor, colXs[3], y);
+    doc.text('' + weight, colXs[4], y);
+    y -= 14;
   }
 
-  // Totals row (highlighted with line above)
-  doc.line(M, y, R, y);
+  // Totals
+  y -= 2;
+  doc.line(M, y + 10, R, y + 10);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
-  doc.text('' + totalCases, colXs[0], y + 12);
-  doc.text('' + totalUnitsCalc, colXs[1], y + 12);
-  doc.text('TOTAL', colXs[4], y + 12);
-  doc.text('' + totalProductWeight, colXs[5], y + 12);
-  y += rowH + 2;
+  var totalUnits = 0;
+  for (var i = 0; i < items.length; i++) {
+    var product = PRODUCTS[items[i].flavor];
+    var upc = (product && product.size === '1oz') ? 48 : 24;
+    totalUnits += items[i].qty * upc;
+  }
+  doc.text('' + totalCases, colXs[0], y);
+  doc.text('' + totalUnits, colXs[1], y);
+  doc.text('TOTAL', colXs[3], y);
+  doc.text('' + totalProductWeight, colXs[4], y);
 
-  // Outer table border
-  doc.setLineWidth(0.5);
-  doc.rect(M, tableTop, R - M, y - tableTop);
-  y += 8;
+  doc.rect(M, y - 6, R - M, tableTop - y + 16);
+  y -= 22;
 
   // === SUMMARY ROW ===
-  var sumH = 22;
-  doc.setLineWidth(0.5);
-  doc.rect(M, y, R - M, sumH);
+  var sumTop = y + 4;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   var sumItems = [
@@ -2968,62 +2824,49 @@ function drawTJXBOL(doc, shipment, deliveryOrder, tjx, po) {
   ];
   var sumSpacing = (R - M) / sumItems.length;
   for (var si = 0; si < sumItems.length; si++) {
-    doc.text(sumItems[si], M + 6 + si * sumSpacing, y + 14);
+    doc.text(sumItems[si], M + 4 + si * sumSpacing, y);
   }
-  y += sumH + 12;
+  y -= 6;
+  doc.rect(M, y, R - M, sumTop - y + 6);
+  y -= 24;
 
   // === SPECIAL INSTRUCTIONS ===
-  // Rules from the TJX shipping email + handling note from shipper.
-  var instructions = [
-    'TJX Load ID: ' + (tjx.loadId || '') + '  |  Pickup Date: ' + pickupDate + '  |  Terms: 3rd Party Collect to TJX.',
-    'Carrier contacts vendor to schedule pickup.',
-    '1 Load ID = 1 BOL. Do not separate BOLs per PO.',
-    'BOL destination address must match the consignee address listed above.',
-    '*** DO NOT STACK ***'
-  ];
-  var instH = 16 + instructions.length * 11 + 4;
-  doc.setLineWidth(0.5);
-  doc.rect(M, y, R - M, instH);
+  var instTop = y + 4;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  doc.text('SPECIAL INSTRUCTIONS:', M + 6, y + 12);
+  doc.text('SPECIAL INSTRUCTIONS:', M + 4, y);
+  y -= 13;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  var ily = y + 24;
+  var instructions = [
+    'TJX Load ID: ' + tjx.loadId + '  |  Pickup Date: ' + pickupDate + '  |  Terms: Freight Collect',
+    'Carrier contacts Vendor to schedule pickup.',
+    'All pallets must be loaded using the pinwheeled method.',
+    'Pallets must be built to 7ft high to maximize trailer utilization (4ft for double-stacked).',
+    'Multiple destinations cannot be combined on the same pallet.',
+    'Must schedule appointment and load within two hours of appointment time.'
+  ];
   for (var ins = 0; ins < instructions.length; ins++) {
-    var line = instructions[ins];
-    var isStackWarn = /DO NOT STACK/i.test(line);
-    if (isStackWarn) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(200, 0, 0);
-    }
-    doc.text(line, M + 6, ily);
-    if (isStackWarn) {
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.setTextColor(0, 0, 0);
-      ily += 13;
-    } else {
-      ily += 11;
-    }
+    doc.text(instructions[ins], M + 4, y);
+    y -= 11;
   }
-  y += instH + 14;
+  y -= 2;
+  doc.rect(M, y, R - M, instTop - y + 6);
+  y -= 30;
 
   // === SIGNATURES ===
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  doc.text('Shipper Signature: ___________________________________', M, y + 10);
-  doc.text('Carrier Signature: ___________________________________', midX + 20, y + 10);
-  doc.text('Date: ________________', M, y + 28);
-  doc.text('Date: ________________', midX + 20, y + 28);
-  y += 44;
+  doc.text('Shipper Signature: ___________________________________', M, y);
+  doc.text('Carrier Signature: ___________________________________', midX + 20, y);
+  y -= 16;
+  doc.text('Date: ________________', M, y);
+  doc.text('Date: ________________', midX + 20, y);
+  y -= 20;
 
   // === FOOTER ===
   doc.setFontSize(7);
-  doc.setTextColor(100, 100, 100);
-  doc.text('This shipment is subject to the terms and conditions of the carrier\'s applicable tariff.', midX, y + 8, { align: 'center' });
-  doc.setTextColor(0, 0, 0);
+  doc.text('This shipment is subject to the terms and conditions of the carrier\'s applicable tariff.', midX, y, { align: 'center' });
 }
 
 // Generate a single label page onto a jsPDF doc
@@ -4629,47 +4472,11 @@ function buildPalletAssignment(prefix) {
   buildShipmentSummary(prefix);
 }
 
-// Refresh lot code labels in the pallet assignment table WITHOUT resetting quantities
+// Refresh lot code labels AND quantities in the pallet assignment table
+// Fully rebuilds the pallet table so lot qty changes are reflected
 function refreshPalletLotLabels(prefix) {
   prefix = prefix || '';
-  const div = document.getElementById('palletAssignment' + prefix);
-  if (!div || !div._palletRows) return;
-  const rows = div._palletRows;
-
-  const isDC = prefix.startsWith('_dc');
-  const dcIdx = isDC ? prefix.replace('_dc', '') : null;
-
-  // Re-read lot data from DOM and update both _palletRows and the label cells
-  for (let r = 0; r < rows.length; r++) {
-    const row = rows[r];
-    let freshLot, freshBB;
-    if (row.isSubLot) {
-      let suffix = isDC ? dcIdx + '_' + row.itemIdx + '_' + row.lotIdx : row.itemIdx + '_' + row.lotIdx;
-      freshLot = document.getElementById('lot_' + suffix)?.value?.trim() || 'TBD';
-      freshBB = document.getElementById('bb_' + suffix)?.value?.trim() || 'TBD';
-    } else {
-      let lotId = isDC ? 'lot_' + dcIdx + '_' + row.itemIdx : 'lot_' + row.itemIdx;
-      let bbId = isDC ? 'bb_' + dcIdx + '_' + row.itemIdx : 'bb_' + row.itemIdx;
-      freshLot = document.getElementById(lotId)?.value?.trim() || 'TBD';
-      freshBB = document.getElementById(bbId)?.value?.trim() || 'TBD';
-    }
-    // Update stored data
-    row.lotLabel = freshLot;
-    row.lotBB = freshBB;
-
-    // Update the label cell in the table (first <td> of this row)
-    const table = div.querySelector('table');
-    if (table) {
-      // tbody rows: skip header row (thead), row index r in tbody
-      const tbody = table.querySelector('tbody');
-      if (tbody && tbody.rows[r]) {
-        const cell = tbody.rows[r].cells[0];
-        const size = PRODUCTS[row.flavor]?.size === '1oz' ? '1oz' : '2.2oz';
-        const lotInfo = row.isSubLot ? ' <span style="color:#6366f1; font-size:11px; font-weight:500;">\u2014 LOT: ' + freshLot + '</span>' : '';
-        cell.innerHTML = row.flavor + ' <span style="color:#888; font-size:11px">(' + size + ')</span>' + lotInfo;
-      }
-    }
-  }
+  buildPalletAssignment(prefix);
 }
 
 // Read pallet assignment data from the UI for a given pallet index
@@ -5418,7 +5225,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.19d</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.21a</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
