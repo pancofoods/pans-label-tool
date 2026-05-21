@@ -469,7 +469,7 @@ function getLotsForFlavor(flavorName) {
   if (!abbrev) return [];
   const size = (flavorName.includes('1oz')) ? '1oz' : '2.2oz';
   return registryLots.filter(function(lot) {
-    return lot.flavor === abbrev && lot.size === size && lot.qtyRemaining > 0;
+    return lot.flavor === abbrev && lot.size === size && (lot.qtyRemaining > 0 || lot.status === 'In Progress');
   });
 }
 
@@ -529,15 +529,19 @@ function wrapWithLotPicker(lotInputId, bbInputId, flavorName) {
       item.className = 'lot-picker-item';
 
       const c = LOT_COLORS[lot.flavor] || { bg: '#f1f5f9', text: '#475569' };
-      const pct = Math.round((lot.qtyRemaining / lot.qtyProduced) * 100);
-      const lowClass = pct < 15 ? ' low' : '';
+      const isIP = lot.status === 'In Progress';
+      const pct = lot.qtyProduced > 0 ? Math.round((lot.qtyRemaining / lot.qtyProduced) * 100) : 100;
+      const lowClass = !isIP && pct < 15 ? ' low' : '';
 
       var bbFormatted = formatBBDate(lot.bbDate);
+      var remainingText = isIP
+        ? '<span style="font-size:9px;color:#0369a1;font-weight:bold">IN PROGRESS</span>'
+        : '<span class="lot-remaining' + lowClass + '">' + lot.qtyRemaining.toLocaleString() + ' left</span>';
       item.innerHTML =
         '<span class="lot-flavor" style="background:' + c.bg + ';color:' + c.text + '">' + lot.flavor + '</span>' +
         '<span class="lot-code">#' + lot.lotCode + '</span>' +
         '<span class="lot-bb">BB: ' + bbFormatted + '</span>' +
-        '<span class="lot-remaining' + lowClass + '">' + lot.qtyRemaining.toLocaleString() + ' left</span>';
+        remainingText;
 
       item.addEventListener('click', function() {
         lotInput.value = lot.lotCode;
