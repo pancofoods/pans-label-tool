@@ -137,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.21a</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.22b</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -356,6 +356,29 @@ const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycby5e8rhEY4bGGLxSGeHU
 let registryLots = [];
 let registryConnected = false;
 
+// Format BB date: convert ISO strings like "2027-02-19T08:00:00.000Z" to "MM/DD/YY"
+function formatBBDate(val) {
+  if (!val || val === 'TBD') return val;
+  val = String(val).trim();
+  // Catch ISO 8601 format (from Google Sheets Date objects serialized to JSON)
+  var isoMatch = val.match(/^(\d{4})-(\d{2})-(\d{2})T/);
+  if (isoMatch) {
+    var m = parseInt(isoMatch[2]);
+    var d = parseInt(isoMatch[3]);
+    var y = isoMatch[1].slice(2); // last 2 digits
+    return m + '/' + d + '/' + y;
+  }
+  // Also catch "YYYY-MM-DD" without time
+  var dateMatch = val.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateMatch) {
+    var m = parseInt(dateMatch[2]);
+    var d = parseInt(dateMatch[3]);
+    var y = dateMatch[1].slice(2);
+    return m + '/' + d + '/' + y;
+  }
+  return val; // already formatted (e.g. "1/16/27")
+}
+
 // Flavor mapping: label generator uses full names, registry uses abbreviations
 const FLAVOR_TO_ABBREV = {
   'Original': 'OG', 'Zesty Thai': 'ZT', 'Salt & Pepper': 'SP',
@@ -393,7 +416,10 @@ async function loadRegistryLots() {
     const resp = await fetch(WEBAPP_URL + '?action=getLots', { redirect: 'follow' });
     const data = await resp.json();
     if (data.success && data.lots) {
-      registryLots = data.lots;
+      registryLots = data.lots.map(function(lot) {
+        lot.bbDate = formatBBDate(lot.bbDate);
+        return lot;
+      });
       registryConnected = true;
       console.log('Loaded ' + registryLots.length + ' active lots from registry');
     } else {
@@ -430,7 +456,7 @@ function getLotsForFlavor(flavorName) {
   if (!abbrev) return [];
   const size = (flavorName.includes('1oz')) ? '1oz' : '2.2oz';
   return registryLots.filter(function(lot) {
-    return lot.flavor === abbrev && lot.size === size && lot.qtyRemaining > 0;
+    return lot.flavor === abbrev && lot.size === size && (lot.qtyRemaining > 0 || lot.status === 'In Progress');
   });
 }
 
@@ -474,20 +500,24 @@ function wrapWithLotPicker(lotInputId, bbInputId, flavorName) {
       item.className = 'lot-picker-item';
 
       const c = LOT_COLORS[lot.flavor] || { bg: '#f1f5f9', text: '#475569' };
-      const pct = Math.round((lot.qtyRemaining / lot.qtyProduced) * 100);
-      const lowClass = pct < 15 ? ' low' : '';
+      const isIP = lot.status === 'In Progress';
+      const pct = lot.qtyProduced > 0 ? Math.round((lot.qtyRemaining / lot.qtyProduced) * 100) : 100;
+      const lowClass = !isIP && pct < 15 ? ' low' : '';
+      const remainingText = isIP
+        ? '<span style="color:#0369a1;font-weight:bold;font-size:10px">IN PROGRESS</span>'
+        : '<span class="lot-remaining' + lowClass + '">' + lot.qtyRemaining.toLocaleString() + ' left</span>';
 
       item.innerHTML =
         '<span class="lot-flavor" style="background:' + c.bg + ';color:' + c.text + '">' + lot.flavor + '</span>' +
         '<span class="lot-code">#' + lot.lotCode + '</span>' +
-        '<span class="lot-bb">BB: ' + lot.bbDate + '</span>' +
-        '<span class="lot-remaining' + lowClass + '">' + lot.qtyRemaining.toLocaleString() + ' left</span>';
+        '<span class="lot-bb">BB: ' + formatBBDate(lot.bbDate) + '</span>' +
+        remainingText;
 
       item.addEventListener('click', function() {
         lotInput.value = lot.lotCode;
         if (bbInputId) {
           const bbInput = document.getElementById(bbInputId);
-          if (bbInput) bbInput.value = lot.bbDate;
+          if (bbInput) bbInput.value = formatBBDate(lot.bbDate);
         }
         dropdown.classList.remove('open');
         // Trigger any existing oninput handlers
@@ -2914,7 +2944,7 @@ function addLabelPage(doc, product, flavor, order, boxNum) {
   doc.text('Description: ' + product.description, L, y); y += 11;
   doc.text('SKU: ' + product.sku + ' - ' + product.upc, L, y); y += 13;
   doc.setFont('helvetica','bold'); doc.setFontSize(10);
-  doc.text('B.B. Date: ' + (order.bb||'TBD') + '    LOT: ' + (order.lot||'TBD'), L, y);
+  doc.text('B.B. Date: ' + formatBBDate(order.bb||'TBD') + '    LOT: ' + (order.lot||'TBD'), L, y);
   y += 20;
 
   // Box ___ of ___ line
@@ -3410,11 +3440,11 @@ function addPalletTagPage(doc, tagData, palletNum, totalPallets) {
     if (item.lots && item.lots.length > 0) {
       for (let l = 0; l < item.lots.length; l++) {
         const lot = item.lots[l];
-        doc.text('BB: ' + lot.bb + '  LOT: ' + lot.lot + '  (' + lot.qty + ' cs)', L, y);
+        doc.text('BB: ' + formatBBDate(lot.bb) + '  LOT: ' + lot.lot + '  (' + lot.qty + ' cs)', L, y);
         y += unit * 0.85;
       }
     } else {
-      doc.text('BB: ' + (item.bb || 'TBD') + '  LOT: ' + (item.lot || 'TBD'), L, y);
+      doc.text('BB: ' + formatBBDate(item.bb || 'TBD') + '  LOT: ' + (item.lot || 'TBD'), L, y);
       y += unit * 0.85;
     }
 
@@ -5225,7 +5255,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.21a</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.22b</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
