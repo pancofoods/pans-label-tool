@@ -137,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.25b</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.25d</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -156,6 +156,17 @@
   <!-- Extracted line items -->
   <div class="card" id="lineItemsCard" style="display:none">
     <div class="card-title">Order Details <span id="poTitle" style="font-weight:400;color:#666;font-size:13px"></span></div>
+    <div id="workflowBanner" style="background:linear-gradient(135deg,#fffbeb,#fef3c7); border:1px solid #f59e0b; border-radius:8px; padding:14px 18px; margin-bottom:16px; font-size:13px; line-height:1.6;">
+      <div style="font-weight:700; font-size:14px; color:#92400e; margin-bottom:6px;">Before You Start</div>
+      <div style="color:#78350f;">
+        <div style="margin-bottom:4px;"><span style="font-weight:600;">1.</span> Compare quantities below to the PO in your hand — <strong>do they match?</strong></div>
+        <div style="margin-bottom:4px;"><span style="font-weight:600;">2.</span> Select a lot code for each flavor from the dropdown. If no lot is available, <strong>talk to a manager</strong> or add the lot to the registry in the spreadsheet first.</div>
+        <div style="margin-bottom:4px;"><span style="font-weight:600;">3.</span> Verify the order total matches your PO.</div>
+        <div style="background:#fef9c3; border-radius:4px; padding:8px 10px; margin-top:8px; border-left:3px solid #d97706;">
+          <strong style="color:#92400e;">Do NOT deduct lots or close this tab</strong> until the order is fully picked, wrapped, and picked up or shipped.
+        </div>
+      </div>
+    </div>
     <div class="form-row">
       <div class="form-group"><label>Ship To Name</label><input type="text" id="ex_ship_name" style="background:#f9f9f9"></div>
     </div>
@@ -168,6 +179,8 @@
         <thead><tr>
           <th>Flavor</th>
           <th class="qty-col">Cases</th>
+          <th class="qty-col">$/Case</th>
+          <th class="qty-col">Total</th>
           <th class="qty-col">Lots</th>
           <th class="bb-col">B.B. Date</th>
           <th class="lot-col">LOT Code</th>
@@ -2273,9 +2286,12 @@ function displayExtracted(po) {
   const tbody = document.getElementById('lineItemsBody');
   tbody.innerHTML = '';
   po.line_items.forEach((item, i) => {
+    var defaultPrice = getDefaultPrice(item.flavor, po.ship_name);
     const tr = document.createElement('tr');
     tr.innerHTML = '<td class="flavor-col">' + flavorDisplay(item.flavor) + '</td>' +
       '<td class="qty-col">' + item.qty + '</td>' +
+      '<td class="qty-col"><input type="number" id="price_' + i + '" value="' + defaultPrice.toFixed(2) + '" min="0" step="0.01" style="width:80px;text-align:right" onchange="updateLineTotals(\'\')"></td>' +
+      '<td class="qty-col" id="linetotal_' + i + '" style="text-align:right;font-weight:600;">$' + (item.qty * defaultPrice).toFixed(2) + '</td>' +
       '<td class="qty-col"><input type="number" id="lots_' + i + '" value="1" min="1" max="10" style="width:70px;text-align:center" onchange="expandLots(\'\', ' + i + ', ' + item.qty + ', false)"></td>' +
       '<td><input type="text" id="bb_' + i + '" placeholder="MM/DD/YY"></td>' +
       '<td><input type="text" id="lot_' + i + '" placeholder="Lot code" oninput="buildLotCodeSummary(\'\');"></td>' +
@@ -2285,12 +2301,23 @@ function displayExtracted(po) {
     tbody.appendChild(tr);
   });
 
+  // Grand total row
+  var totalRowEl = document.getElementById('orderTotalRow');
+  if (!totalRowEl) {
+    totalRowEl = document.createElement('div');
+    totalRowEl.id = 'orderTotalRow';
+    totalRowEl.style.cssText = 'display:flex; justify-content:flex-end; padding:8px 0; font-size:15px; font-weight:700; border-top:2px solid #e5e7eb; margin-top:4px;';
+    totalRowEl.innerHTML = 'Order Total: <span id="orderGrandTotal" style="margin-left:8px; color:#059669;"></span>';
+    document.getElementById('lineItemsTable').parentNode.insertBefore(totalRowEl, document.getElementById('lineItemsTable').nextSibling);
+  }
+
   document.getElementById('lineItemsCard').style.display = 'block';
   document.getElementById('lineItemsCard').scrollIntoView({ behavior: 'smooth' });
   buildShipmentSummary('');
   buildShippingInstructions('');
   buildLotCodeSummary('');
   updateWeightEstimate('');
+  updateLineTotals('');
   setTimeout(attachLotPickers, 100);
 
   // Show SSCC pallet label section for Thrive Market orders
@@ -2352,13 +2379,16 @@ function displayMultiDC(po) {
     // Line items table
     const table = document.createElement('table');
     table.className = 'line-items';
-    table.innerHTML = '<thead><tr><th>Flavor</th><th class="qty-col">Cases</th><th class="qty-col">Lots</th><th class="bb-col">B.B. Date</th><th class="lot-col">LOT Code</th><th class="qty-col">Start Box</th><th class="qty-col">End Box</th><th></th></tr></thead>';
+    table.innerHTML = '<thead><tr><th>Flavor</th><th class="qty-col">Cases</th><th class="qty-col">$/Case</th><th class="qty-col">Total</th><th class="qty-col">Lots</th><th class="bb-col">B.B. Date</th><th class="lot-col">LOT Code</th><th class="qty-col">Start Box</th><th class="qty-col">End Box</th><th></th></tr></thead>';
     const tbody = document.createElement('tbody');
 
     shipment.line_items.forEach((item, itemIdx) => {
+      var defaultPrice = getDefaultPrice(item.flavor, shipment.ship_name);
       const tr = document.createElement('tr');
       tr.innerHTML = '<td class="flavor-col">' + flavorDisplay(item.flavor) + '</td>' +
         '<td class="qty-col">' + item.qty + '</td>' +
+        '<td class="qty-col"><input type="number" id="price_' + dcIdx + '_' + itemIdx + '" value="' + defaultPrice.toFixed(2) + '" min="0" step="0.01" style="width:80px;text-align:right" onchange="updateLineTotals(\'_dc' + dcIdx + '\')"></td>' +
+        '<td class="qty-col" id="linetotal_' + dcIdx + '_' + itemIdx + '" style="text-align:right;font-weight:600;">$' + (item.qty * defaultPrice).toFixed(2) + '</td>' +
         '<td class="qty-col"><input type="number" id="lots_' + dcIdx + '_' + itemIdx + '" value="1" min="1" max="10" style="width:70px;text-align:center" onchange="expandLots(\'' + dcIdx + '_\', ' + itemIdx + ', ' + item.qty + ', true)"></td>' +
         '<td><input type="text" id="bb_' + dcIdx + '_' + itemIdx + '" placeholder="MM/DD/YY"></td>' +
         '<td><input type="text" id="lot_' + dcIdx + '_' + itemIdx + '" placeholder="Lot code" oninput="buildLotCodeSummary(\'_dc' + dcIdx + '\');"></td>' +
@@ -2370,6 +2400,12 @@ function displayMultiDC(po) {
 
     table.appendChild(tbody);
     section.appendChild(table);
+
+    // Grand total row for this DC
+    const dcTotalRow = document.createElement('div');
+    dcTotalRow.style.cssText = 'display:flex; justify-content:flex-end; padding:8px 0; font-size:15px; font-weight:700; border-top:2px solid #e5e7eb; margin-top:4px;';
+    dcTotalRow.innerHTML = 'DC Total: <span id="orderGrandTotal_dc' + dcIdx + '" style="margin-left:8px; color:#059669;"></span>';
+    section.appendChild(dcTotalRow);
 
     // Per-DC generate button
     const dcBtn = document.createElement('button');
@@ -2444,6 +2480,7 @@ function displayMultiDC(po) {
     buildShipmentSummary('_dc' + i);
     buildShippingInstructions('_dc' + i);
     buildLotCodeSummary('_dc' + i);
+    updateLineTotals('_dc' + i);
   });
   setTimeout(attachLotPickers, 100);
 
@@ -3635,6 +3672,65 @@ function updatePalletTotals(prefix, numPallets, numRows, capacity) {
 
   // Refresh shipment summary on every edit
   buildShipmentSummary(prefix);
+}
+
+// ============================================================
+// DISTRIBUTOR PRICING (for PO cost verification)
+// ============================================================
+const DISTRIBUTOR_PRICING = {
+  kehe: { perCase: 90.00, label: '$90/case' },
+  snack_guru_2oz: { perUnit: 2.25, unitsPerCase: 24, label: '$2.25/unit' },
+  snack_guru_1oz: { perUnit: 1.35, unitsPerCase: 48, label: '$1.35/unit' },
+  thrive: { perCase: 86.40, label: '$86.40/case' },
+  sierra_tjx: { perCase: 72.00, label: '$72/case' },
+  homegoods: { perCase: 72.00, label: '$72/case' },
+  grocery_outlet: { perCase: 72.00, label: '$72/case' },
+  foundation_foods: { perUnit: 3.00, unitsPerCase: 24, label: '$3/unit' },
+  default: { perCase: 0, label: 'Enter price' }
+};
+
+function getDefaultPrice(flavor, shipToName) {
+  var name = (shipToName || '').toLowerCase();
+  if (name.includes('snack guru')) {
+    var is1oz = (flavor || '').includes('1oz');
+    var p = is1oz ? DISTRIBUTOR_PRICING.snack_guru_1oz : DISTRIBUTOR_PRICING.snack_guru_2oz;
+    return (p.perUnit * p.unitsPerCase);
+  }
+  if (name.includes('kehe')) return DISTRIBUTOR_PRICING.kehe.perCase;
+  if (name.includes('thrive')) return DISTRIBUTOR_PRICING.thrive.perCase;
+  if (name.includes('sierra') || name.includes('tjx')) return DISTRIBUTOR_PRICING.sierra_tjx.perCase;
+  if (name.includes('homegoods') || name.includes('home goods')) return DISTRIBUTOR_PRICING.homegoods.perCase;
+  if (name.includes('grocery outlet')) return DISTRIBUTOR_PRICING.grocery_outlet.perCase;
+  if (name.includes('foundation')) {
+    var p2 = DISTRIBUTOR_PRICING.foundation_foods;
+    return (p2.perUnit * p2.unitsPerCase);
+  }
+  return DISTRIBUTOR_PRICING.default.perCase;
+}
+
+function updateLineTotals(prefix) {
+  prefix = prefix || '';
+  var po = extractedPO;
+  if (!po) return;
+  var items = po.line_items || [];
+  if (prefix && prefix.startsWith('_dc')) {
+    var dcIdx = parseInt(prefix.replace('_dc', ''));
+    if (po.shipments && po.shipments[dcIdx]) items = po.shipments[dcIdx].line_items || [];
+  }
+  var grandTotal = 0;
+  var idPrefix = prefix ? prefix.replace('_dc', '') + '_' : '';
+  for (var i = 0; i < items.length; i++) {
+    var priceEl = document.getElementById('price_' + idPrefix + i);
+    var totalEl = document.getElementById('linetotal_' + idPrefix + i);
+    if (priceEl && totalEl) {
+      var price = parseFloat(priceEl.value) || 0;
+      var lineTotal = items[i].qty * price;
+      grandTotal += lineTotal;
+      totalEl.textContent = '$' + lineTotal.toFixed(2);
+    }
+  }
+  var gtEl = document.getElementById('orderGrandTotal' + prefix);
+  if (gtEl) gtEl.textContent = '$' + grandTotal.toFixed(2);
 }
 
 // ============================================================
@@ -5309,7 +5405,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.25b</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.25d</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
