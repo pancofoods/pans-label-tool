@@ -3880,11 +3880,11 @@ function updateWeightEstimate(prefix) {
   var el = document.getElementById('weightEstimate' + (prefix ? prefix : ''));
   if (!el) el = document.getElementById('weightEstimate');
   if (!el) return;
-  var items = parsedPO ? parsedPO.line_items : [];
+  var items = extractedPO ? extractedPO.line_items : [];
   if (prefix && prefix.startsWith('_dc')) {
     var dcIdx = parseInt(prefix.replace('_dc', ''));
-    if (parsedPO && parsedPO.shipments && parsedPO.shipments[dcIdx]) {
-      items = parsedPO.shipments[dcIdx].line_items || [];
+    if (extractedPO && extractedPO.shipments && extractedPO.shipments[dcIdx]) {
+      items = extractedPO.shipments[dcIdx].line_items || [];
     }
   }
   var totalCases = 0;
