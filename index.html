@@ -137,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.22b</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.25a</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -178,11 +178,12 @@
         <tbody id="lineItemsBody"></tbody>
       </table>
       <button class="btn btn-primary" onclick="generateAllLabels()" style="margin-top:16px">Generate All Labels</button>
-      <div style="margin-top:16px; display:flex; gap:12px; align-items:center;">
+      <div style="margin-top:16px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
         <label style="margin:0;">Total Pallets:</label>
         <input type="number" id="totalPallets" min="1" value="1" style="width:60px; padding:6px; border:1px solid #ccc; border-radius:4px;" onchange="buildPalletAssignment()">
         <button class="btn" onclick="buildPalletAssignment('')" style="padding:8px 16px;background:#6b7280;color:white;border-radius:6px;">Recalculate Pallets</button>
         <button class="btn btn-primary" onclick="generatePalletTags()" style="padding:8px 16px;">Generate Pallet Tags</button>
+        <span id="weightEstimate" style="margin-left:auto; font-size:13px; font-weight:600; color:#555; background:#f0f9ff; padding:4px 10px; border-radius:6px; border:1px solid #bfdbfe;"></span>
       </div>
       <div id="palletAssignment" style="display:none; margin-top:12px;"></div>
       <div id="shipmentSummary" style="display:none; margin-top:12px;"></div>
@@ -791,6 +792,7 @@ const KEHE_DC_DATABASE = {
   'breinigsville': { name: 'KeHE Distributors', displayName: 'KEHE - Breinigsville', addr: '860 Nestle Way', csz: 'Breinigsville, PA 18031' },
   'dallas':        { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - DALLAS', addr: '4450 Logistics Drive', csz: 'Dallas, TX 75241' },
   'bloomington':   { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - BLOOMINGTON', addr: '2500 W Airway Rd', csz: 'Bloomington, IN 47404' },
+  'ellettsville':  { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - ELLETTSVILLE', addr: '8101 West State Rte 46', csz: 'Ellettsville, IN 47429' },
   'chino':         { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - CHINO', addr: '16081 Fern Avenue', csz: 'Chino, CA 91708' },
   'north east':    { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - North East MD', addr: '585 PRINCIPIO PKY W', csz: 'NORTH EAST, MD 21901' },
   'portland':      { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - PORTLAND', addr: '9555 NE Alderwood Rd', csz: 'Portland, OR 97220', altZips: ['97006'] },
@@ -2268,6 +2270,7 @@ function displayExtracted(po) {
   buildShipmentSummary('');
   buildShippingInstructions('');
   buildLotCodeSummary('');
+  updateWeightEstimate('');
   setTimeout(attachLotPickers, 100);
 
   // Show SSCC pallet label section for Thrive Market orders
@@ -2691,7 +2694,7 @@ function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) {
   for (var i = 0; i < items.length; i++) {
     totalCases += items[i].qty;
   }
-  var caseWeightLb = 6;
+  var caseWeightLb = BOL_CONSTANTS.weightPerCase;
   var palletWeightLb = 40;
   var totalProductWeight = totalCases * caseWeightLb;
   var numPallets = 1;
@@ -2812,7 +2815,7 @@ function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) {
     var product = PRODUCTS[item.flavor];
     var unitsPerCase = (product && product.size === '1oz') ? 48 : 24;
     var units = item.qty * unitsPerCase;
-    var weight = item.qty * caseWeightLb;
+    var weight = Math.ceil(item.qty * caseWeightLb);
     var sku = product ? product.sku : '';
 
     doc.text('' + item.qty, colXs[0], y);
@@ -3619,7 +3622,7 @@ function updatePalletTotals(prefix, numPallets, numRows, capacity) {
 // ============================================================
 const BOL_CONSTANTS = {
   shipFrom: { name: 'Panco Foods, Inc. DBA PAN\'S', addr: '302 SE 7th Ave', csz: 'Portland, OR 97214-1201' },
-  weightPerCase: 6, // lbs — based on actual BOLs (5lb product + ~1lb box)
+  weightPerCase: 5.8, // lbs per master case (actual measured weight)
   palletWeight: 40, // lbs
   palletBaseHeight: 6, // inches
   palletDims: '48x40', // inches
@@ -3841,7 +3844,7 @@ function getShipmentStats(prefix) {
       palletItems = pd.items;
     }
     const layers = Math.ceil(palletCases / box.perLayer);
-    const productWeight = palletCases * BOL_CONSTANTS.weightPerCase;
+    const productWeight = Math.ceil(palletCases * BOL_CONSTANTS.weightPerCase);
     const totalWeight = productWeight + BOL_CONSTANTS.palletWeight;
     const height = BOL_CONSTANTS.palletBaseHeight + (layers * box.d);
     pallets.push({
@@ -3870,6 +3873,26 @@ function getShipmentStats(prefix) {
     },
     allItems: items
   };
+}
+
+function updateWeightEstimate(prefix) {
+  prefix = prefix || '';
+  var el = document.getElementById('weightEstimate' + (prefix ? prefix : ''));
+  if (!el) el = document.getElementById('weightEstimate');
+  if (!el) return;
+  var items = parsedPO ? parsedPO.line_items : [];
+  if (prefix && prefix.startsWith('_dc')) {
+    var dcIdx = parseInt(prefix.replace('_dc', ''));
+    if (parsedPO && parsedPO.shipments && parsedPO.shipments[dcIdx]) {
+      items = parsedPO.shipments[dcIdx].line_items || [];
+    }
+  }
+  var totalCases = 0;
+  for (var i = 0; i < items.length; i++) totalCases += items[i].qty;
+  var numPallets = parseInt(document.getElementById('totalPallets' + (prefix ? prefix : ''))?.value) || 1;
+  var productWt = Math.ceil(totalCases * BOL_CONSTANTS.weightPerCase);
+  var totalWt = productWt + (numPallets * BOL_CONSTANTS.palletWeight);
+  el.textContent = '≈ ' + totalWt + ' lbs (' + totalCases + ' cases × ' + BOL_CONSTANTS.weightPerCase + ' lb + ' + numPallets + ' pallet' + (numPallets > 1 ? 's' : '') + ')';
 }
 
 function buildShipmentSummary(prefix) {
@@ -3916,7 +3939,7 @@ function buildShipmentSummary(prefix) {
   html += '<td style="padding:4px 8px;">Total</td>';
   html += '<td style="text-align:center; padding:4px 8px;">' + stats.totalCases + '</td>';
   html += '<td style="text-align:center; padding:4px 8px;">—</td>';
-  html += '<td style="text-align:center; padding:4px 8px;">' + (stats.totalCases * BOL_CONSTANTS.weightPerCase) + ' lb</td>';
+  html += '<td style="text-align:center; padding:4px 8px;">' + Math.ceil(stats.totalCases * BOL_CONSTANTS.weightPerCase) + ' lb</td>';
   html += '<td style="text-align:center; padding:4px 8px;">' + stats.totalWeight + ' lb</td>';
   html += '<td style="text-align:center; padding:4px 8px;">—</td>';
   html += '<td style="text-align:center; padding:4px 8px;">—</td>';
@@ -4138,7 +4161,7 @@ function generateBOL(prefix) {
   // # Packages
   cell(M + col1W, y, col2W, rowH, String(stats.totalCases), { bold: true, fs: 11, center: true });
   // Weight
-  cell(M + col1W + col2W, y, col3W, rowH, (stats.totalCases * BOL_CONSTANTS.weightPerCase) + ' lb', { bold: true, fs: 10, center: true });
+  cell(M + col1W + col2W, y, col3W, rowH, Math.ceil(stats.totalCases * BOL_CONSTANTS.weightPerCase) + ' lb', { bold: true, fs: 10, center: true });
   // Pallet Y/N
   doc.rect(M + col1W + col2W + col3W, y, col4W, rowH);
   doc.setFontSize(8);
@@ -4170,7 +4193,7 @@ function generateBOL(prefix) {
   doc.setFontSize(9);
   doc.text(stats.numPallets + ' pallet' + (stats.numPallets > 1 ? 's' : ''), M + col1W - 50, y + 12);
   cell(M + col1W, y, col2W, gtH, String(stats.totalCases), { bold: true, fs: 11, center: true });
-  cell(M + col1W + col2W, y, col3W, gtH, (stats.totalCases * BOL_CONSTANTS.weightPerCase) + ' lb', { bold: true, fs: 10, center: true });
+  cell(M + col1W + col2W, y, col3W, gtH, Math.ceil(stats.totalCases * BOL_CONSTANTS.weightPerCase) + ' lb', { bold: true, fs: 10, center: true });
   cell(M + col1W + col2W + col3W, y, col4W + col5W, gtH, '');
   y += gtH;
 
@@ -4500,6 +4523,7 @@ function buildPalletAssignment(prefix) {
 
   // Refresh shipment summary with per-pallet breakdown
   buildShipmentSummary(prefix);
+  updateWeightEstimate(prefix);
 }
 
 // Refresh lot code labels AND quantities in the pallet assignment table
@@ -5255,7 +5279,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.22b</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.25a</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
@@ -5293,6 +5317,7 @@ ssccUpdateDisplay();
         <div><span style="color:#16a34a;">&#9679;</span> Chino, CA</div>
         <div><span style="color:#16a34a;">&#9679;</span> Dallas, TX</div>
         <div><span style="color:#16a34a;">&#9679;</span> Elkton, FL</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Ellettsville, IN</div>
         <div><span style="color:#16a34a;">&#9679;</span> North East, MD</div>
         <div><span style="color:#16a34a;">&#9679;</span> Portland (Beaverton), OR</div>
         <div><span style="color:#16a34a;">&#9679;</span> Stockton, CA</div>
