@@ -1362,6 +1362,16 @@ async function processPO(file) {
         }
         fullText = ocrTexts.join('\n');
         usedOCR = true;
+        // DEBUG: show OCR text on page (remove after debugging)
+        var dbg = document.getElementById('ocrDebug');
+        if (!dbg) {
+          dbg = document.createElement('div');
+          dbg.id = 'ocrDebug';
+          dbg.style.cssText = 'margin:12px 0;padding:12px;background:#1e293b;border-radius:8px;';
+          dbg.innerHTML = '<div style="color:#fbbf24;font-weight:700;font-size:12px;margin-bottom:6px;">DEBUG: Raw OCR Text (remove after testing)</div><textarea id="ocrDebugText" style="width:100%;height:300px;font-family:monospace;font-size:11px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:8px;"></textarea>';
+          statusEl.parentNode.insertBefore(dbg, statusEl.nextSibling);
+        }
+        document.getElementById('ocrDebugText').value = fullText;
       }
     }
 
