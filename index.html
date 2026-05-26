@@ -138,7 +138,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.25g</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.25h</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -2283,22 +2283,18 @@ function parsePO(text) {
     }
   } else if (isOSJL) {
     // OSJL POs are image-based (scanned) — OCR text can be noisy.
-    // Match by OSJL SKU numbers OR description keywords.
-    // OSJL SKU → flavor mapping
+    // Actual OCR output for line items looks like:
+    //   "1 100 24 400 342346 00201 JERKY 2.20Z MUSHROOM ORIGINAL 3.1500 | EA 3.1500"
+    //   "2 100 24 100 342349 00226 JERKY 2.202 MUSHROOM TERIYAKI 3.1500_| EA 3.1800"
+    // Columns: LineNo | CaseOrderQty | InnerPcs | CasesPerPallet | SKU# | MFG# | Description | Price | Unit | SellPrice
+    // The qty we want is the Case Order Qty (2nd number, after line number).
+    // OCR may merge/misread numbers, so we match by SKU or description, then extract qty.
+
     const OSJL_SKU_MAP = {
       '342346': 'Original',
       '342349': 'Teriyaki',
       '347162': 'Applewood BBQ',
       '347163': 'Salt & Pepper'
-    };
-    // Also try MFG# (Pan's internal codes on the PO)
-    const OSJL_MFG_MAP = {
-      '00201': 'Original',
-      '00225': 'Teriyaki',
-      '00206': 'Applewood BBQ',
-      '00204': 'Salt & Pepper',
-      '00203': 'Zesty Thai',
-      '00208': 'Curry'
     };
 
     const osjlLines = text.split('\n');
@@ -2306,51 +2302,52 @@ function parsePO(text) {
       const line = osjlLines[i];
       let flavor = '';
 
-      // Method 1: Match by OSJL SKU number
+      // Method 1: Match by OSJL SKU number (tolerant of trailing comma/period from OCR)
       for (const [sku, fl] of Object.entries(OSJL_SKU_MAP)) {
-        if (line.includes(sku)) { flavor = fl; break; }
+        if (new RegExp(sku + '[,.]?\\s').test(line) || line.includes(sku)) { flavor = fl; break; }
       }
-      // Method 2: Match by MFG#
+      // Method 2: Match by description keywords (OCR-tolerant: "2.20Z" or "2.202")
       if (!flavor) {
-        for (const [mfg, fl] of Object.entries(OSJL_MFG_MAP)) {
-          if (line.includes(mfg) && /JERKY|MUSHROOM|BBQ|SALT|PEPPER|ORIGINAL|TERIYAKI|CURRY|THAI/i.test(line)) { flavor = fl; break; }
-        }
-      }
-      // Method 3: Match by description keywords (OCR-tolerant)
-      if (!flavor) {
-        if (/MUSHROOM\s*ORIGINAL|ORIGINAL/i.test(line) && /JERKY|2\.?2/i.test(line)) flavor = 'Original';
-        else if (/MUSHROOM\s*TERIYAKI|TERIYAKI/i.test(line) && /JERKY|2\.?2/i.test(line)) flavor = 'Teriyaki';
-        else if (/BBQ\s*APPLEWOOD|APPLEWOOD/i.test(line) && /JERKY|2\.?2/i.test(line)) flavor = 'Applewood BBQ';
-        else if (/SALT\s*[&+]?\s*PEPPER/i.test(line) && /JERKY|2\.?2/i.test(line)) flavor = 'Salt & Pepper';
-        else if (/ZESTY\s*THAI/i.test(line) && /JERKY|2\.?2/i.test(line)) flavor = 'Zesty Thai';
-        else if (/CURRY/i.test(line) && /JERKY|MUSHROOM|2\.?2/i.test(line)) flavor = 'Curry';
+        if (/MUSHROOM\s*ORIGINAL/i.test(line)) flavor = 'Original';
+        else if (/MUSHROOM\s*TERIYAKI/i.test(line)) flavor = 'Teriyaki';
+        else if (/BBQ\s*APPLEWOOD/i.test(line)) flavor = 'Applewood BBQ';
+        else if (/SALT\s*[&+]?\s*PEPPER/i.test(line)) flavor = 'Salt & Pepper';
+        else if (/ZESTY\s*THAI/i.test(line)) flavor = 'Zesty Thai';
+        else if (/CURRY/i.test(line) && /JERKY|MUSHROOM/i.test(line)) flavor = 'Curry';
       }
 
       if (flavor && !line_items.some(li => li.flavor === flavor)) {
-        // Extract qty: look for the "Cases per Pallet" column value (e.g. 100)
-        // OCR row format varies but typically: "2400 1 100 24 100 342346 00201 JERKY..."
-        // The qty we want is the "Cases per Pallet" or "Cases" column.
-        // Try: number before SKU/MFG#, or number followed by price pattern
+        // Extract qty from OCR line. The line starts with:
+        //   "LineNo CaseQty InnerPcs CasesPerPallet SKU# MFG# JERKY..."
+        // e.g. "1 100 24 400 342346 00201 JERKY..."  or  "2 100 24 100 342349 00226 JERKY..."
+        // We want the 2nd number (CaseQty = 100), NOT CasesPerPallet or TotalPieces.
         let qty = 0;
-        const qtyMatch = line.match(/(\d+)\s+\$?[\d.]+\s+\$?[\d,.]+\s*$/) // qty + unit price + total at end
-          || line.match(/(\d+)\s+(?:342|347)\d{3}/) // qty before OSJL SKU
-          || line.match(/(\d+)\s+002\d{2}/) // qty before MFG#
-          || line.match(/\b(\d{2,3})\b.*(?:JERKY|MUSHROOM|BBQ|SALT)/i); // qty before description
-        if (qtyMatch) {
-          qty = parseInt(qtyMatch[1]);
+
+        // Primary: match the structured line pattern "lineNo qty 24 xxx SKU"
+        // The "24" is inner pack count (always 24 for 2.2oz), and 100 precedes it
+        const structMatch = line.match(/^\s*\d+\s+(\d+)\s+24\s+/);
+        if (structMatch) {
+          qty = parseInt(structMatch[1]);
         }
-        // Sanity check: qty should be reasonable (1-999 cases)
-        if (qty > 0 && qty < 1000) {
-          line_items.push({ flavor, qty });
-        } else {
-          // Last resort: scan all numbers in line, pick one that's in 10-500 range
-          const allNums = line.match(/\b(\d{2,3})\b/g);
-          if (allNums) {
-            for (const n of allNums) {
-              const v = parseInt(n);
-              if (v >= 10 && v <= 500) { line_items.push({ flavor, qty: v }); break; }
+
+        // Fallback: look for "100" or similar case qty near the SKU
+        if (!qty) {
+          // Find all numbers before "JERKY" or before the SKU
+          const beforeDesc = line.split(/JERKY|342\d{3}|347\d{3}/i)[0];
+          if (beforeDesc) {
+            // Get all 2-3 digit numbers from the prefix
+            const nums = beforeDesc.match(/\b(\d{2,3})\b/g);
+            if (nums) {
+              // The case qty is typically the 2nd number (after line number)
+              // Filter: skip "24" (inner pack) and line numbers (1-18)
+              const candidates = nums.map(Number).filter(n => n > 18 && n !== 24 && n < 500);
+              if (candidates.length > 0) qty = candidates[0];
             }
           }
+        }
+
+        if (qty > 0 && qty < 1000) {
+          line_items.push({ flavor, qty });
         }
       }
     }
@@ -5508,7 +5505,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.25g</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.25h</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
