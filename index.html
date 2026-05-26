@@ -10,6 +10,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; min-height: 100vh; }
@@ -137,7 +138,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.25f</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.25g</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -1334,6 +1335,34 @@ async function processPO(file) {
           fullText += rows[y].map(item => item.str).join(' ') + '\n';
         }
       }
+
+      // ── OCR fallback for image-based PDFs (e.g. OSJL scanned POs) ──
+      var usedOCR = false;
+      if (fullText.trim().length < 30 && typeof Tesseract !== 'undefined') {
+        statusEl.className = 'status info';
+        statusEl.textContent = 'Image-based PDF detected — running OCR (this may take a few seconds)...';
+        // Render each page to canvas at 2x scale for better OCR accuracy
+        const ocrTexts = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 2.0 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d');
+          await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+          const { data: { text: ocrText } } = await Tesseract.recognize(canvas, 'eng', {
+            logger: m => {
+              if (m.status === 'recognizing text' && m.progress) {
+                statusEl.textContent = 'OCR page ' + i + '/' + pdf.numPages + ' — ' + Math.round(m.progress * 100) + '%';
+              }
+            }
+          });
+          ocrTexts.push(ocrText);
+        }
+        fullText = ocrTexts.join('\n');
+        usedOCR = true;
+      }
     }
 
     // Check for TJX multi-DC format first (uses position-aware parsing for blank cells)
@@ -1363,7 +1392,7 @@ async function processPO(file) {
     } else {
       displayExtracted(parsed);
       statusEl.className = 'status success';
-      const fileType = isHTML ? 'HTML' : 'PDF';
+      const fileType = isHTML ? 'HTML' : (usedOCR ? 'PDF (OCR)' : 'PDF');
       statusEl.textContent = 'PO #' + parsed.po_number + ' loaded from ' + fileType + ' — ' + parsed.line_items.length + ' line items found';
     }
   } catch(err) {
@@ -1829,7 +1858,7 @@ function parsePO(text) {
     const poMatch = text.match(/PO\s*No:?\s*(\S+)/i);
     po_number = poMatch ? poMatch[1] : '';
   } else if (isOSJL) {
-    const poMatch = text.match(/PO\s*#?\s*:?\s*(\d+)/i) || text.match(/Purchase\s*Order\s*#?\s*:?\s*(\d+)/i);
+    const poMatch = text.match(/P\.?O\.?\s*#\s*(\d+)/i) || text.match(/PO\s*#?\s*:?\s*(\d+)/i) || text.match(/Purchase\s*Order\s*#?\s*:?\s*(\d+)/i);
     po_number = poMatch ? poMatch[1] : '';
   } else {
     const poMatch = text.match(/Order\s*#:?\s*(\d+)/i) || text.match(/PO\s*#?:?\s*(\d+)/i)
@@ -2253,26 +2282,75 @@ function parsePO(text) {
       if (cases > 0) line_items.push({ flavor, qty: cases });
     }
   } else if (isOSJL) {
-    // OSJL uses description keywords: "MUSHROOM ORIGINAL", "MUSHROOM TERIYAKI", "BBQ APPLEWOOD", "SALT & PEPPER"
-    // PO line format: SKU# | MFG# | Description | QTY | Unit Price | Amount
-    // Match by description, then grab qty
+    // OSJL POs are image-based (scanned) — OCR text can be noisy.
+    // Match by OSJL SKU numbers OR description keywords.
+    // OSJL SKU → flavor mapping
+    const OSJL_SKU_MAP = {
+      '342346': 'Original',
+      '342349': 'Teriyaki',
+      '347162': 'Applewood BBQ',
+      '347163': 'Salt & Pepper'
+    };
+    // Also try MFG# (Pan's internal codes on the PO)
+    const OSJL_MFG_MAP = {
+      '00201': 'Original',
+      '00225': 'Teriyaki',
+      '00206': 'Applewood BBQ',
+      '00204': 'Salt & Pepper',
+      '00203': 'Zesty Thai',
+      '00208': 'Curry'
+    };
+
     const osjlLines = text.split('\n');
     for (let i = 0; i < osjlLines.length; i++) {
       const line = osjlLines[i];
       let flavor = '';
-      if (/MUSHROOM\s+ORIGINAL|ORIGINAL.*MUSHROOM/i.test(line)) flavor = 'Original';
-      else if (/MUSHROOM\s+TERIYAKI|TERIYAKI.*MUSHROOM/i.test(line)) flavor = 'Teriyaki';
-      else if (/BBQ\s+APPLEWOOD|APPLEWOOD.*BBQ/i.test(line)) flavor = 'Applewood BBQ';
-      else if (/SALT\s*[&+]\s*PEPPER|SALT.*PEPPER/i.test(line)) flavor = 'Salt & Pepper';
-      else if (/ZESTY\s+THAI/i.test(line)) flavor = 'Zesty Thai';
-      else if (/CURRY/i.test(line) && /MUSHROOM|JERKY|2\.2/i.test(line)) flavor = 'Curry';
+
+      // Method 1: Match by OSJL SKU number
+      for (const [sku, fl] of Object.entries(OSJL_SKU_MAP)) {
+        if (line.includes(sku)) { flavor = fl; break; }
+      }
+      // Method 2: Match by MFG#
+      if (!flavor) {
+        for (const [mfg, fl] of Object.entries(OSJL_MFG_MAP)) {
+          if (line.includes(mfg) && /JERKY|MUSHROOM|BBQ|SALT|PEPPER|ORIGINAL|TERIYAKI|CURRY|THAI/i.test(line)) { flavor = fl; break; }
+        }
+      }
+      // Method 3: Match by description keywords (OCR-tolerant)
+      if (!flavor) {
+        if (/MUSHROOM\s*ORIGINAL|ORIGINAL/i.test(line) && /JERKY|2\.?2/i.test(line)) flavor = 'Original';
+        else if (/MUSHROOM\s*TERIYAKI|TERIYAKI/i.test(line) && /JERKY|2\.?2/i.test(line)) flavor = 'Teriyaki';
+        else if (/BBQ\s*APPLEWOOD|APPLEWOOD/i.test(line) && /JERKY|2\.?2/i.test(line)) flavor = 'Applewood BBQ';
+        else if (/SALT\s*[&+]?\s*PEPPER/i.test(line) && /JERKY|2\.?2/i.test(line)) flavor = 'Salt & Pepper';
+        else if (/ZESTY\s*THAI/i.test(line) && /JERKY|2\.?2/i.test(line)) flavor = 'Zesty Thai';
+        else if (/CURRY/i.test(line) && /JERKY|MUSHROOM|2\.?2/i.test(line)) flavor = 'Curry';
+      }
+
       if (flavor && !line_items.some(li => li.flavor === flavor)) {
-        // Try to find qty: look for a number that represents cases (typically 50-500 range)
-        // In the OSJL PO format: "100 $3.15 $7,560.00" at end of line or qty column
-        const qtyMatch = line.match(/(\d+)\s+\$[\d.]+\s+\$[\d,.]+/) || line.match(/\b(\d{2,3})\b.*\$[\d.]/);
+        // Extract qty: look for the "Cases per Pallet" column value (e.g. 100)
+        // OCR row format varies but typically: "2400 1 100 24 100 342346 00201 JERKY..."
+        // The qty we want is the "Cases per Pallet" or "Cases" column.
+        // Try: number before SKU/MFG#, or number followed by price pattern
+        let qty = 0;
+        const qtyMatch = line.match(/(\d+)\s+\$?[\d.]+\s+\$?[\d,.]+\s*$/) // qty + unit price + total at end
+          || line.match(/(\d+)\s+(?:342|347)\d{3}/) // qty before OSJL SKU
+          || line.match(/(\d+)\s+002\d{2}/) // qty before MFG#
+          || line.match(/\b(\d{2,3})\b.*(?:JERKY|MUSHROOM|BBQ|SALT)/i); // qty before description
         if (qtyMatch) {
-          const qty = parseInt(qtyMatch[1]);
-          if (qty > 0 && qty < 1000) line_items.push({ flavor, qty });
+          qty = parseInt(qtyMatch[1]);
+        }
+        // Sanity check: qty should be reasonable (1-999 cases)
+        if (qty > 0 && qty < 1000) {
+          line_items.push({ flavor, qty });
+        } else {
+          // Last resort: scan all numbers in line, pick one that's in 10-500 range
+          const allNums = line.match(/\b(\d{2,3})\b/g);
+          if (allNums) {
+            for (const n of allNums) {
+              const v = parseInt(n);
+              if (v >= 10 && v <= 500) { line_items.push({ flavor, qty: v }); break; }
+            }
+          }
         }
       }
     }
@@ -5430,7 +5508,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.25f</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.25g</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
