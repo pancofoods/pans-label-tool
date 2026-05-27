@@ -138,7 +138,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.26b</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.26c</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -2306,13 +2306,13 @@ function parsePO(text) {
       if (cases > 0) line_items.push({ flavor, qty: cases });
     }
   } else if (isOSJL) {
-    // OSJL POs are image-based (scanned) — OCR text can be noisy.
-    // Actual OCR output for line items looks like:
-    //   "1 100 24 400 342346 00201 JERKY 2.20Z MUSHROOM ORIGINAL 3.1500 | EA 3.1500"
-    //   "2 100 24 100 342349 00226 JERKY 2.202 MUSHROOM TERIYAKI 3.1500_| EA 3.1800"
-    // Columns: LineNo | CaseOrderQty | InnerPcs | CasesPerPallet | SKU# | MFG# | Description | Price | Unit | SellPrice
-    // The qty we want is the Case Order Qty (2nd number, after line number).
-    // OCR may merge/misread numbers, so we match by SKU or description, then extract qty.
+    // OSJL POs are image-based (scanned) — OCR text is noisy.
+    // Actual browser OCR output for line items:
+    //   "2400] 1 190 24 10 342346 00201 JERKY 2.20Z MUSHROOM ORIGINAL 3.1800 |EA 31500"
+    //   "T4362 190 24 100 342349 03225 JERKY 2.20Z MUSHROOM TERIYAKI 3.1500 |EA 3 1500"
+    //   "200] 3 190 24 10¢ 347182 03206 JERKY 2.20Z BBQ APPLEWOOD 2.1500 [CA 31500"
+    //   "2am 4 190 24 100 347163 03204 JERKY 2.20Z SALT & PEPPER . 3.1500 |EA 3 150C"
+    // Strategy: match flavors by description, extract qty using total pieces / 24.
 
     const OSJL_SKU_MAP = {
       '342346': 'Original',
@@ -2322,15 +2322,25 @@ function parsePO(text) {
     };
 
     const osjlLines = text.split('\n');
+    const osjlRawItems = []; // collect {flavor, qty} then do consensus check
+
     for (let i = 0; i < osjlLines.length; i++) {
       const line = osjlLines[i];
       let flavor = '';
 
-      // Method 1: Match by OSJL SKU number (tolerant of trailing comma/period from OCR)
+      // Method 1: Match by OSJL SKU number (tolerant of OCR noise: "347182" ≈ "347162")
       for (const [sku, fl] of Object.entries(OSJL_SKU_MAP)) {
-        if (new RegExp(sku + '[,.]?\\s').test(line) || line.includes(sku)) { flavor = fl; break; }
+        // Allow 1-digit difference in SKU for OCR errors
+        if (line.includes(sku)) { flavor = fl; break; }
       }
-      // Method 2: Match by description keywords (OCR-tolerant: "2.20Z" or "2.202")
+      // Also try fuzzy SKU match (OCR might read 347162 as 347182)
+      if (!flavor) {
+        if (/3423\d{2}/.test(line) && /ORIGINAL/i.test(line)) flavor = 'Original';
+        else if (/3423\d{2}/.test(line) && /TERIYAKI/i.test(line)) flavor = 'Teriyaki';
+        else if (/3471\d{2}/.test(line) && /APPLEWOOD|BBQ/i.test(line)) flavor = 'Applewood BBQ';
+        else if (/3471\d{2}/.test(line) && /SALT|PEPPER/i.test(line)) flavor = 'Salt & Pepper';
+      }
+      // Method 2: Match by description keywords only
       if (!flavor) {
         if (/MUSHROOM\s*ORIGINAL/i.test(line)) flavor = 'Original';
         else if (/MUSHROOM\s*TERIYAKI/i.test(line)) flavor = 'Teriyaki';
@@ -2340,38 +2350,76 @@ function parsePO(text) {
         else if (/CURRY/i.test(line) && /JERKY|MUSHROOM/i.test(line)) flavor = 'Curry';
       }
 
-      if (flavor && !line_items.some(li => li.flavor === flavor)) {
-        // Extract qty from OCR line. The line starts with:
-        //   "LineNo CaseQty InnerPcs CasesPerPallet SKU# MFG# JERKY..."
-        // e.g. "1 100 24 400 342346 00201 JERKY..."  or  "2 100 24 100 342349 00226 JERKY..."
-        // We want the 2nd number (CaseQty = 100), NOT CasesPerPallet or TotalPieces.
+      if (flavor && !osjlRawItems.some(li => li.flavor === flavor)) {
         let qty = 0;
 
-        // Primary: match the structured line pattern "lineNo qty 24 xxx SKU"
-        // The "24" is inner pack count (always 24 for 2.2oz), and 100 precedes it
-        const structMatch = line.match(/^\s*\d+\s+(\d+)\s+24\s+/);
-        if (structMatch) {
-          qty = parseInt(structMatch[1]);
-        }
-
-        // Fallback: look for "100" or similar case qty near the SKU
-        if (!qty) {
-          // Find all numbers before "JERKY" or before the SKU
-          const beforeDesc = line.split(/JERKY|342\d{3}|347\d{3}/i)[0];
-          if (beforeDesc) {
-            // Get all 2-3 digit numbers from the prefix
-            const nums = beforeDesc.match(/\b(\d{2,3})\b/g);
-            if (nums) {
-              // The case qty is typically the 2nd number (after line number)
-              // Filter: skip "24" (inner pack) and line numbers (1-18)
-              const candidates = nums.map(Number).filter(n => n > 18 && n !== 24 && n < 500);
-              if (candidates.length > 0) qty = candidates[0];
-            }
+        // Strategy 1: Find total pieces (4-digit number like 2400) and compute cases = total/24
+        // OCR output: "2400] 1 190..." or garbled "T4362..." — look for any 4-digit number
+        const totalPcsMatch = line.match(/(\d{4})/);
+        if (totalPcsMatch) {
+          const tp = parseInt(totalPcsMatch[1]);
+          // Total pieces should be divisible by 24 and in reasonable range (240-24000)
+          if (tp >= 240 && tp <= 24000 && tp % 24 === 0) {
+            qty = tp / 24;
           }
         }
 
-        if (qty > 0 && qty < 1000) {
-          line_items.push({ flavor, qty });
+        // Strategy 2: Find number right before SKU (e.g. "100 342349")
+        if (!qty) {
+          const beforeSku = line.match(/(\d{2,3})\s+(?:342|347)\d{3}/);
+          if (beforeSku) {
+            const v = parseInt(beforeSku[1]);
+            if (v > 5 && v < 500 && v !== 24) qty = v;
+          }
+        }
+
+        // Strategy 3: Look for "24" anchor, then get the number before it
+        // OCR: "...190 24 10..." — the "190" before "24" is OCR's attempt at the qty
+        if (!qty) {
+          const before24 = line.match(/(\d{2,3})\s+24\s/);
+          if (before24) {
+            const v = parseInt(before24[1]);
+            if (v > 18 && v < 500) qty = v;
+          }
+        }
+
+        osjlRawItems.push({ flavor, qty });
+      }
+    }
+
+    // Consensus check: if most items share the same qty, apply it to items with bad/zero qty.
+    // Also: if a qty looks like OCR misread (190 instead of 100), check if total pieces validates.
+    if (osjlRawItems.length > 0) {
+      // Count qty frequencies
+      const qtyCounts = {};
+      osjlRawItems.forEach(item => {
+        if (item.qty > 0) qtyCounts[item.qty] = (qtyCounts[item.qty] || 0) + 1;
+      });
+      // Find the most common qty
+      let consensusQty = 0;
+      let maxCount = 0;
+      for (const [q, c] of Object.entries(qtyCounts)) {
+        if (c > maxCount) { maxCount = c; consensusQty = parseInt(q); }
+      }
+
+      // Also check: total order in PO footer (e.g. "400 BUYER" = 400 total cases)
+      const totalOrderMatch = text.match(/(\d{3,4})\s+(?:BUYER|FUYER)/i);
+      if (totalOrderMatch && osjlRawItems.length > 0) {
+        const totalCases = parseInt(totalOrderMatch[1]);
+        const perItem = Math.round(totalCases / osjlRawItems.length);
+        // If evenly divisible and reasonable, use this as the per-item qty
+        if (perItem > 0 && totalCases === perItem * osjlRawItems.length) {
+          consensusQty = perItem;
+        }
+      }
+
+      // Apply consensus to all items
+      for (const item of osjlRawItems) {
+        const qty = (item.qty > 0 && Math.abs(item.qty - consensusQty) < consensusQty * 0.3)
+          ? item.qty
+          : (consensusQty || item.qty);
+        if (qty > 0) {
+          line_items.push({ flavor: item.flavor, qty: qty });
         }
       }
     }
@@ -5529,7 +5577,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.26b</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.26c</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
