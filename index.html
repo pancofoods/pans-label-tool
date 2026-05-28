@@ -138,7 +138,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.26c</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.27b</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -1376,16 +1376,6 @@ async function processPO(file) {
         }
         fullText = ocrTexts.join('\n');
         usedOCR = true;
-        // DEBUG: show OCR text on page (remove after debugging)
-        var dbg = document.getElementById('ocrDebug');
-        if (!dbg) {
-          dbg = document.createElement('div');
-          dbg.id = 'ocrDebug';
-          dbg.style.cssText = 'margin:12px 0;padding:12px;background:#1e293b;border-radius:8px;';
-          dbg.innerHTML = '<div style="color:#fbbf24;font-weight:700;font-size:12px;margin-bottom:6px;">DEBUG: Raw OCR Text (remove after testing)</div><textarea id="ocrDebugText" style="width:100%;height:300px;font-family:monospace;font-size:11px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:8px;"></textarea>';
-          statusEl.parentNode.insertBefore(dbg, statusEl.nextSibling);
-        }
-        document.getElementById('ocrDebugText').value = fullText;
       }
     }
 
@@ -3852,7 +3842,7 @@ const SHIPPING_INSTRUCTIONS = {
   moreno_valley: { type: 'unishippers', transitTime: 'LTL 1-2 days / UPS 3 days', deliveryInstructions: 'Appointment Hrs: 0000-0630 (AM)\nEmail: MORAppts@unfi.com', preferredCarriers: 'Estes - daily drops\nOld Dominion - 2-3 drops/week', doNotUse: 'XPO\nRoadrunner\nForward Air\nTForce', notes: 'Only use preferred carriers due to overnight receiving hours' },
   chesterfield: { type: 'unishippers', transitTime: 'LTL', deliveryInstructions: '', preferredCarriers: 'YRC - 1-2 deliveries per week\nEstes - drops 1 trailer every Tuesday (10-15 days behind)\nOld Dominion - drops trailer about 3 times per week', doNotUse: 'XPO\nSAIA', notes: '' },
   dayville: { type: 'unishippers', transitTime: '', deliveryInstructions: '', preferredCarriers: 'ESTES - Drops 1 trailer every Wednesday', doNotUse: '', notes: 'ONLY USE PREFERRED CARRIERS' },
-  sarasota: { type: 'unishippers', transitTime: '', deliveryInstructions: '', preferredCarriers: 'Estes - 1-2 trailer drops per week (every Thursday + extra)\nOld Dominion - drops about 3 trailers per week\nTforce\nForwardAir\nXPO\nAAA Cooper\nCentral Transport\nR&L', doNotUse: 'SAIA (no answer)', notes: '' },
+  sarasota: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Receiving is 10pm-3am Sun Night - Friday Morning\nsarappts@unfi.com', preferredCarriers: 'Estes', doNotUse: 'SAIA (no answer)', notes: '' },
   aurora_unfi: { type: 'unishippers', transitTime: 'LTL 2-4 days / UPS 2 days', deliveryInstructions: 'Appt hours: M-F 12AM-5AM\nEmail: AURAppts@unfi.com\n(303) 360-8459', preferredCarriers: 'ABF Freight\nEstes - delivers every day or every 2 days (trailer drops and live unloads)\nOld Dominion - delivers every day or two depending on volume', doNotUse: 'YRC\nReddaway\nForward Air\nXpress Global\nR&L\nTforce (HOLD ON USING T-FORCE)', notes: 'Only use preferred carriers' },
   rocklin: { type: 'unishippers', transitTime: 'LTL 2-3 days / UPS 2 days', deliveryInstructions: 'Appointment Hrs: 02:00-08:30 (AM)\nEmail: RocklinAppts@unfi.com', preferredCarriers: 'ABF\nOld Dominion - daily delivery/drops\nSAIA - Tues/Thurs delivery\nReddaway - 3 deliveries/week (usually MWF)\nEstes - confirmed Nov 2023 they deliver to UNFI Rocklin', doNotUse: 'XPO\nRoadrunner\nForward Air\nT-Force', notes: 'Only use preferred carriers due to overnight receiving hours. 2nd option: Estes (books appointments after freight arrives at terminal, 2-4 more days to deliver)' },
   ridgefield: { type: 'unishippers', transitTime: '', deliveryInstructions: 'RidgefieldAppts@unfi.com\nAppt hrs: M-F 2am-8am', preferredCarriers: 'Old Dominion\nEstes', doNotUse: '', notes: '' },
@@ -5577,7 +5567,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.26c</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.27b</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
