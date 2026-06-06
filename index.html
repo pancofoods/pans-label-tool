@@ -10,7 +10,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; min-height: 100vh; }
@@ -138,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.27c</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.05.21a</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -147,7 +146,7 @@
     <div class="card-title">Upload Purchase Order</div>
     <div class="upload-area" id="uploadArea" onclick="document.getElementById('poFile').click()">
       <p class="upload-main">Drop PO PDF here or click to browse</p>
-      <p>Supports UNFI, KeHE, Thrive Market, Foundation Foods, Market of Choice, Sierra Trading Post, HomeGoods, Grocery Outlet, and Snack Guru orders (PDF, HTML, TXT, or XLSX)</p>
+      <p>Supports UNFI, KeHE, Thrive Market, Foundation Foods, Market of Choice, Sierra Trading Post, HomeGoods, and Grocery Outlet orders (PDF, HTML, TXT, or XLSX)</p>
       <p style="margin-top:6px;"><a href="#" onclick="event.preventDefault();event.stopPropagation();document.getElementById('accountsModal').style.display='flex';" style="font-size:12px;color:#2563eb;text-decoration:underline;">View all supported accounts &amp; DCs</a></p>
       <input type="file" id="poFile" accept=".pdf,.html,.htm,.xlsx,.xls,.txt,.text" onchange="handlePOUpload(event)">
     </div>
@@ -157,17 +156,6 @@
   <!-- Extracted line items -->
   <div class="card" id="lineItemsCard" style="display:none">
     <div class="card-title">Order Details <span id="poTitle" style="font-weight:400;color:#666;font-size:13px"></span></div>
-    <div id="workflowBanner" style="background:linear-gradient(135deg,#fffbeb,#fef3c7); border:1px solid #f59e0b; border-radius:8px; padding:14px 18px; margin-bottom:16px; font-size:13px; line-height:1.6;">
-      <div style="font-weight:700; font-size:14px; color:#92400e; margin-bottom:6px;">Before You Start</div>
-      <div style="color:#78350f;">
-        <div style="margin-bottom:4px;"><span style="font-weight:600;">1.</span> Compare quantities below to the PO in your hand — <strong>do they match?</strong></div>
-        <div style="margin-bottom:4px;"><span style="font-weight:600;">2.</span> Select a lot code for each flavor from the dropdown. If no lot is available, <strong>talk to a manager</strong> or add the lot to the registry in the spreadsheet first.</div>
-        <div style="margin-bottom:4px;"><span style="font-weight:600;">3.</span> Verify the order total matches your PO.</div>
-        <div style="background:#fef9c3; border-radius:4px; padding:8px 10px; margin-top:8px; border-left:3px solid #d97706;">
-          <strong style="color:#92400e;">Do NOT deduct lots or close this tab</strong> until the order is fully picked, wrapped, and picked up or shipped.
-        </div>
-      </div>
-    </div>
     <div class="form-row">
       <div class="form-group"><label>Ship To Name</label><input type="text" id="ex_ship_name" style="background:#f9f9f9"></div>
     </div>
@@ -190,12 +178,11 @@
         <tbody id="lineItemsBody"></tbody>
       </table>
       <button class="btn btn-primary" onclick="generateAllLabels()" style="margin-top:16px">Generate All Labels</button>
-      <div style="margin-top:16px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+      <div style="margin-top:16px; display:flex; gap:12px; align-items:center;">
         <label style="margin:0;">Total Pallets:</label>
         <input type="number" id="totalPallets" min="1" value="1" style="width:60px; padding:6px; border:1px solid #ccc; border-radius:4px;" onchange="buildPalletAssignment()">
         <button class="btn" onclick="buildPalletAssignment('')" style="padding:8px 16px;background:#6b7280;color:white;border-radius:6px;">Recalculate Pallets</button>
         <button class="btn btn-primary" onclick="generatePalletTags()" style="padding:8px 16px;">Generate Pallet Tags</button>
-        <span id="weightEstimate" style="margin-left:auto; font-size:13px; font-weight:600; color:#555; background:#f0f9ff; padding:4px 10px; border-radius:6px; border:1px solid #bfdbfe;"></span>
       </div>
       <div id="palletAssignment" style="display:none; margin-top:12px;"></div>
       <div id="shipmentSummary" style="display:none; margin-top:12px;"></div>
@@ -369,29 +356,6 @@ const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycby5e8rhEY4bGGLxSGeHU
 let registryLots = [];
 let registryConnected = false;
 
-// Format BB date: convert ISO strings like "2027-02-19T08:00:00.000Z" to "MM/DD/YY"
-function formatBBDate(val) {
-  if (!val || val === 'TBD') return val;
-  val = String(val).trim();
-  // Catch ISO 8601 format (from Google Sheets Date objects serialized to JSON)
-  var isoMatch = val.match(/^(\d{4})-(\d{2})-(\d{2})T/);
-  if (isoMatch) {
-    var m = parseInt(isoMatch[2]);
-    var d = parseInt(isoMatch[3]);
-    var y = isoMatch[1].slice(2); // last 2 digits
-    return m + '/' + d + '/' + y;
-  }
-  // Also catch "YYYY-MM-DD" without time
-  var dateMatch = val.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (dateMatch) {
-    var m = parseInt(dateMatch[2]);
-    var d = parseInt(dateMatch[3]);
-    var y = dateMatch[1].slice(2);
-    return m + '/' + d + '/' + y;
-  }
-  return val; // already formatted (e.g. "1/16/27")
-}
-
 // Flavor mapping: label generator uses full names, registry uses abbreviations
 const FLAVOR_TO_ABBREV = {
   'Original': 'OG', 'Zesty Thai': 'ZT', 'Salt & Pepper': 'SP',
@@ -429,10 +393,7 @@ async function loadRegistryLots() {
     const resp = await fetch(WEBAPP_URL + '?action=getLots', { redirect: 'follow' });
     const data = await resp.json();
     if (data.success && data.lots) {
-      registryLots = data.lots.map(function(lot) {
-        lot.bbDate = formatBBDate(lot.bbDate);
-        return lot;
-      });
+      registryLots = data.lots;
       registryConnected = true;
       console.log('Loaded ' + registryLots.length + ' active lots from registry');
     } else {
@@ -469,7 +430,7 @@ function getLotsForFlavor(flavorName) {
   if (!abbrev) return [];
   const size = (flavorName.includes('1oz')) ? '1oz' : '2.2oz';
   return registryLots.filter(function(lot) {
-    return lot.flavor === abbrev && lot.size === size && (lot.qtyRemaining > 0 || lot.status === 'In Progress');
+    return lot.flavor === abbrev && lot.size === size && lot.status !== 'Depleted';
   });
 }
 
@@ -516,21 +477,26 @@ function wrapWithLotPicker(lotInputId, bbInputId, flavorName) {
       const isIP = lot.status === 'In Progress';
       const pct = lot.qtyProduced > 0 ? Math.round((lot.qtyRemaining / lot.qtyProduced) * 100) : 100;
       const lowClass = !isIP && pct < 15 ? ' low' : '';
-      const remainingText = isIP
-        ? '<span style="color:#0369a1;font-weight:bold;font-size:10px">IN PROGRESS</span>'
-        : '<span class="lot-remaining' + lowClass + '">' + lot.qtyRemaining.toLocaleString() + ' left</span>';
 
+      var remainingText;
+      if (isIP) {
+        remainingText = '<span style="font-size:9px;color:#0369a1;font-weight:bold">IN PROGRESS</span>';
+      } else if (lot.qtyRemaining < 0) {
+        remainingText = '<span class="lot-remaining low">' + lot.qtyRemaining.toLocaleString() + '</span>';
+      } else {
+        remainingText = '<span class="lot-remaining' + lowClass + '">' + lot.qtyRemaining.toLocaleString() + ' left</span>';
+      }
       item.innerHTML =
         '<span class="lot-flavor" style="background:' + c.bg + ';color:' + c.text + '">' + lot.flavor + '</span>' +
         '<span class="lot-code">#' + lot.lotCode + '</span>' +
-        '<span class="lot-bb">BB: ' + formatBBDate(lot.bbDate) + '</span>' +
+        '<span class="lot-bb">BB: ' + lot.bbDate + '</span>' +
         remainingText;
 
       item.addEventListener('click', function() {
         lotInput.value = lot.lotCode;
         if (bbInputId) {
           const bbInput = document.getElementById(bbInputId);
-          if (bbInput) bbInput.value = formatBBDate(lot.bbDate);
+          if (bbInput) bbInput.value = lot.bbDate;
         }
         dropdown.classList.remove('open');
         // Trigger any existing oninput handlers
@@ -804,7 +770,6 @@ const KEHE_DC_DATABASE = {
   'breinigsville': { name: 'KeHE Distributors', displayName: 'KEHE - Breinigsville', addr: '860 Nestle Way', csz: 'Breinigsville, PA 18031' },
   'dallas':        { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - DALLAS', addr: '4450 Logistics Drive', csz: 'Dallas, TX 75241' },
   'bloomington':   { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - BLOOMINGTON', addr: '2500 W Airway Rd', csz: 'Bloomington, IN 47404' },
-  'ellettsville':  { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - ELLETTSVILLE', addr: '8101 West State Rte 46', csz: 'Ellettsville, IN 47429' },
   'chino':         { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - CHINO', addr: '16081 Fern Avenue', csz: 'Chino, CA 91708' },
   'north east':    { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - North East MD', addr: '585 PRINCIPIO PKY W', csz: 'NORTH EAST, MD 21901' },
   'portland':      { name: 'KeHE Distributors', displayName: 'KEHE DISTRIBUTORS - PORTLAND', addr: '9555 NE Alderwood Rd', csz: 'Portland, OR 97220', altZips: ['97006'] },
@@ -1335,48 +1300,6 @@ async function processPO(file) {
           fullText += rows[y].map(item => item.str).join(' ') + '\n';
         }
       }
-
-      // ── OCR fallback for image-based PDFs (e.g. OSJL scanned POs) ──
-      var usedOCR = false;
-      if (fullText.trim().length < 30 && typeof Tesseract !== 'undefined') {
-        statusEl.className = 'status info';
-        statusEl.textContent = 'Image-based PDF detected — running OCR (this may take a few seconds)...';
-        // Render each page to canvas at 3x scale, then preprocess for OCR accuracy
-        const ocrTexts = [];
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const viewport = page.getViewport({ scale: 3.0 });
-          const canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const ctx = canvas.getContext('2d');
-          await page.render({ canvasContext: ctx, viewport: viewport }).promise;
-
-          // Preprocess: convert to high-contrast B&W to remove grid lines and noise
-          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const d = imgData.data;
-          for (let p = 0; p < d.length; p += 4) {
-            // Convert to grayscale
-            const gray = 0.299 * d[p] + 0.587 * d[p+1] + 0.114 * d[p+2];
-            // Threshold: text is dark (< 100), grid lines and background are lighter
-            const bw = gray < 100 ? 0 : 255;
-            d[p] = d[p+1] = d[p+2] = bw;
-          }
-          ctx.putImageData(imgData, 0, 0);
-
-          statusEl.textContent = 'OCR page ' + i + '/' + pdf.numPages + ' — initializing...';
-          const { data: { text: ocrText } } = await Tesseract.recognize(canvas, 'eng', {
-            logger: m => {
-              if (m.status === 'recognizing text' && m.progress) {
-                statusEl.textContent = 'OCR page ' + i + '/' + pdf.numPages + ' — ' + Math.round(m.progress * 100) + '%';
-              }
-            }
-          });
-          ocrTexts.push(ocrText);
-        }
-        fullText = ocrTexts.join('\n');
-        usedOCR = true;
-      }
     }
 
     // Check for TJX multi-DC format first (uses position-aware parsing for blank cells)
@@ -1406,7 +1329,7 @@ async function processPO(file) {
     } else {
       displayExtracted(parsed);
       statusEl.className = 'status success';
-      const fileType = isHTML ? 'HTML' : (usedOCR ? 'PDF (OCR)' : 'PDF');
+      const fileType = isHTML ? 'HTML' : 'PDF';
       statusEl.textContent = 'PO #' + parsed.po_number + ' loaded from ' + fileType + ' — ' + parsed.line_items.length + ' line items found';
     }
   } catch(err) {
@@ -1835,9 +1758,7 @@ function parsePO(text) {
   const isHomeGoods = !isGroceryOutlet && /HomeGoods|ROUTING\s+AND\s+DISTRIBUTION\s+INSTRUCTIONS/i.test(text);
   const isSierra = !isHomeGoods && !isGroceryOutlet && /Sierra|sierratradingpost|TJX\s+Certificate/i.test(text);
   const isFoundationFoods = !isGroceryOutlet && /Foundation\s*Foods/i.test(text);
-  const isSnackGuru = /Snack\s*Guru/i.test(text);
-  const isOSJL = /Ocean\s*State|Job\s*Lot|OSJL/i.test(text);
-  const isUNFI = !isThrive && !isKeHE && !isSierra && !isHomeGoods && !isGroceryOutlet && !isFoundationFoods && !isSnackGuru && !isOSJL && /UNFI|SUPERVALU|Greenwood|PANCO/i.test(text);
+  const isUNFI = !isThrive && !isKeHE && !isSierra && !isHomeGoods && !isGroceryOutlet && !isFoundationFoods && /UNFI|SUPERVALU|Greenwood|PANCO/i.test(text);
 
   // HomeGoods: delegate to dedicated parser immediately
   if (isHomeGoods) {
@@ -1867,12 +1788,6 @@ function parsePO(text) {
     po_number = poMatch ? poMatch[1] : '';
   } else if (isGroceryOutlet) {
     const poMatch = text.match(/PO\s+(\d+)/i) || text.match(/Purchase\s*Order[\s\S]{0,30}?(\d{5,})/i);
-    po_number = poMatch ? poMatch[1] : '';
-  } else if (isSnackGuru) {
-    const poMatch = text.match(/PO\s*No:?\s*(\S+)/i);
-    po_number = poMatch ? poMatch[1] : '';
-  } else if (isOSJL) {
-    const poMatch = text.match(/P\.?O\.?\s*#\s*(\d+)/i) || text.match(/PO\s*#?\s*:?\s*(\d+)/i) || text.match(/Purchase\s*Order\s*#?\s*:?\s*(\d+)/i);
     po_number = poMatch ? poMatch[1] : '';
   } else {
     const poMatch = text.match(/Order\s*#:?\s*(\d+)/i) || text.match(/PO\s*#?:?\s*(\d+)/i)
@@ -2073,14 +1988,6 @@ function parsePO(text) {
       ship_addr = goBlockMatch[1].trim();
       ship_csz = goBlockMatch[2].trim().replace(/,\s*,/, ',');
     }
-  } else if (isSnackGuru) {
-    ship_name = 'Snack Guru LLP';
-    ship_addr = '50 Tagore Lane';
-    ship_csz = 'Singapore 787494';
-  } else if (isOSJL) {
-    ship_name = 'Ocean State Job Lot';
-    ship_addr = '1 Job Lot Way';
-    ship_csz = 'N. Kingstown, RI 02852-8420';
   } else {
     // Generic/other format
     const shipMatch = text.match(/Ship\s*To:.*?Location\s*ID:\s*\S+\s+([A-Z][A-Z\s&]+?)\s+(\d+[\w\s]+(?:AVE|AVENUE|ST|STREET|DR|DRIVE|BLVD|BOULEVARD|RD|ROAD|WAY|LN|LANE|CT|PKWY|PARKWAY)[\w\s.]*)\s+([A-Z][A-Za-z\s]+,\s*[A-Z]{2}\s+\d{5})/i);
@@ -2283,136 +2190,6 @@ function parsePO(text) {
         }
       }
     }
-  } else if (isSnackGuru) {
-    // Snack Guru: "1 Original 2.2oz 22 528 USD 2.25 ..."
-    // Match: flavor name, size (2.2oz or 1oz), then CASE count (first number after size)
-    const sgPattern = /\d+\s+(Original|Teriyaki|Applewood BBQ|Curry|Zesty Thai|Salt & Pepper)\s+(2\.2oz|1oz)\s+(\d+)\s+\d+/gi;
-    let sgMatch;
-    while ((sgMatch = sgPattern.exec(text)) !== null) {
-      let flavor = sgMatch[1];
-      const size = sgMatch[2];
-      const cases = parseInt(sgMatch[3]);
-      if (size === '1oz') flavor = flavor + ' 1oz';
-      if (cases > 0) line_items.push({ flavor, qty: cases });
-    }
-  } else if (isOSJL) {
-    // OSJL POs are image-based (scanned) — OCR text is noisy.
-    // Actual browser OCR output for line items:
-    //   "2400] 1 190 24 10 342346 00201 JERKY 2.20Z MUSHROOM ORIGINAL 3.1800 |EA 31500"
-    //   "T4362 190 24 100 342349 03225 JERKY 2.20Z MUSHROOM TERIYAKI 3.1500 |EA 3 1500"
-    //   "200] 3 190 24 10¢ 347182 03206 JERKY 2.20Z BBQ APPLEWOOD 2.1500 [CA 31500"
-    //   "2am 4 190 24 100 347163 03204 JERKY 2.20Z SALT & PEPPER . 3.1500 |EA 3 150C"
-    // Strategy: match flavors by description, extract qty using total pieces / 24.
-
-    const OSJL_SKU_MAP = {
-      '342346': 'Original',
-      '342349': 'Teriyaki',
-      '347162': 'Applewood BBQ',
-      '347163': 'Salt & Pepper'
-    };
-
-    const osjlLines = text.split('\n');
-    const osjlRawItems = []; // collect {flavor, qty} then do consensus check
-
-    for (let i = 0; i < osjlLines.length; i++) {
-      const line = osjlLines[i];
-      let flavor = '';
-
-      // Method 1: Match by OSJL SKU number (tolerant of OCR noise: "347182" ≈ "347162")
-      for (const [sku, fl] of Object.entries(OSJL_SKU_MAP)) {
-        // Allow 1-digit difference in SKU for OCR errors
-        if (line.includes(sku)) { flavor = fl; break; }
-      }
-      // Also try fuzzy SKU match (OCR might read 347162 as 347182)
-      if (!flavor) {
-        if (/3423\d{2}/.test(line) && /ORIGINAL/i.test(line)) flavor = 'Original';
-        else if (/3423\d{2}/.test(line) && /TERIYAKI/i.test(line)) flavor = 'Teriyaki';
-        else if (/3471\d{2}/.test(line) && /APPLEWOOD|BBQ/i.test(line)) flavor = 'Applewood BBQ';
-        else if (/3471\d{2}/.test(line) && /SALT|PEPPER/i.test(line)) flavor = 'Salt & Pepper';
-      }
-      // Method 2: Match by description keywords only
-      if (!flavor) {
-        if (/MUSHROOM\s*ORIGINAL/i.test(line)) flavor = 'Original';
-        else if (/MUSHROOM\s*TERIYAKI/i.test(line)) flavor = 'Teriyaki';
-        else if (/BBQ\s*APPLEWOOD/i.test(line)) flavor = 'Applewood BBQ';
-        else if (/SALT\s*[&+]?\s*PEPPER/i.test(line)) flavor = 'Salt & Pepper';
-        else if (/ZESTY\s*THAI/i.test(line)) flavor = 'Zesty Thai';
-        else if (/CURRY/i.test(line) && /JERKY|MUSHROOM/i.test(line)) flavor = 'Curry';
-      }
-
-      if (flavor && !osjlRawItems.some(li => li.flavor === flavor)) {
-        let qty = 0;
-
-        // Strategy 1: Find total pieces (4-digit number like 2400) and compute cases = total/24
-        // OCR output: "2400] 1 190..." or garbled "T4362..." — look for any 4-digit number
-        const totalPcsMatch = line.match(/(\d{4})/);
-        if (totalPcsMatch) {
-          const tp = parseInt(totalPcsMatch[1]);
-          // Total pieces should be divisible by 24 and in reasonable range (240-24000)
-          if (tp >= 240 && tp <= 24000 && tp % 24 === 0) {
-            qty = tp / 24;
-          }
-        }
-
-        // Strategy 2: Find number right before SKU (e.g. "100 342349")
-        if (!qty) {
-          const beforeSku = line.match(/(\d{2,3})\s+(?:342|347)\d{3}/);
-          if (beforeSku) {
-            const v = parseInt(beforeSku[1]);
-            if (v > 5 && v < 500 && v !== 24) qty = v;
-          }
-        }
-
-        // Strategy 3: Look for "24" anchor, then get the number before it
-        // OCR: "...190 24 10..." — the "190" before "24" is OCR's attempt at the qty
-        if (!qty) {
-          const before24 = line.match(/(\d{2,3})\s+24\s/);
-          if (before24) {
-            const v = parseInt(before24[1]);
-            if (v > 18 && v < 500) qty = v;
-          }
-        }
-
-        osjlRawItems.push({ flavor, qty });
-      }
-    }
-
-    // Consensus check: if most items share the same qty, apply it to items with bad/zero qty.
-    // Also: if a qty looks like OCR misread (190 instead of 100), check if total pieces validates.
-    if (osjlRawItems.length > 0) {
-      // Count qty frequencies
-      const qtyCounts = {};
-      osjlRawItems.forEach(item => {
-        if (item.qty > 0) qtyCounts[item.qty] = (qtyCounts[item.qty] || 0) + 1;
-      });
-      // Find the most common qty
-      let consensusQty = 0;
-      let maxCount = 0;
-      for (const [q, c] of Object.entries(qtyCounts)) {
-        if (c > maxCount) { maxCount = c; consensusQty = parseInt(q); }
-      }
-
-      // Also check: total order in PO footer (e.g. "400 BUYER" = 400 total cases)
-      const totalOrderMatch = text.match(/(\d{3,4})\s+(?:BUYER|FUYER)/i);
-      if (totalOrderMatch && osjlRawItems.length > 0) {
-        const totalCases = parseInt(totalOrderMatch[1]);
-        const perItem = Math.round(totalCases / osjlRawItems.length);
-        // If evenly divisible and reasonable, use this as the per-item qty
-        if (perItem > 0 && totalCases === perItem * osjlRawItems.length) {
-          consensusQty = perItem;
-        }
-      }
-
-      // Apply consensus to all items
-      for (const item of osjlRawItems) {
-        const qty = (item.qty > 0 && Math.abs(item.qty - consensusQty) < consensusQty * 0.3)
-          ? item.qty
-          : (consensusQty || item.qty);
-        if (qty > 0) {
-          line_items.push({ flavor: item.flavor, qty: qty });
-        }
-      }
-    }
   } else {
     // Generic format: try UPC matching
     for (const [upc, flavor] of Object.entries(UPC_MAP)) {
@@ -2470,7 +2247,6 @@ function displayExtracted(po) {
   buildShipmentSummary('');
   buildShippingInstructions('');
   buildLotCodeSummary('');
-  updateWeightEstimate('');
   setTimeout(attachLotPickers, 100);
 
   // Show SSCC pallet label section for Thrive Market orders
@@ -2894,7 +2670,7 @@ function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) {
   for (var i = 0; i < items.length; i++) {
     totalCases += items[i].qty;
   }
-  var caseWeightLb = BOL_CONSTANTS.weightPerCase;
+  var caseWeightLb = 6;
   var palletWeightLb = 40;
   var totalProductWeight = totalCases * caseWeightLb;
   var numPallets = 1;
@@ -3015,7 +2791,7 @@ function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) {
     var product = PRODUCTS[item.flavor];
     var unitsPerCase = (product && product.size === '1oz') ? 48 : 24;
     var units = item.qty * unitsPerCase;
-    var weight = Math.ceil(item.qty * caseWeightLb);
+    var weight = item.qty * caseWeightLb;
     var sku = product ? product.sku : '';
 
     doc.text('' + item.qty, colXs[0], y);
@@ -3147,7 +2923,7 @@ function addLabelPage(doc, product, flavor, order, boxNum) {
   doc.text('Description: ' + product.description, L, y); y += 11;
   doc.text('SKU: ' + product.sku + ' - ' + product.upc, L, y); y += 13;
   doc.setFont('helvetica','bold'); doc.setFontSize(10);
-  doc.text('B.B. Date: ' + formatBBDate(order.bb||'TBD') + '    LOT: ' + (order.lot||'TBD'), L, y);
+  doc.text('B.B. Date: ' + (order.bb||'TBD') + '    LOT: ' + (order.lot||'TBD'), L, y);
   y += 20;
 
   // Box ___ of ___ line
@@ -3643,11 +3419,11 @@ function addPalletTagPage(doc, tagData, palletNum, totalPallets) {
     if (item.lots && item.lots.length > 0) {
       for (let l = 0; l < item.lots.length; l++) {
         const lot = item.lots[l];
-        doc.text('BB: ' + formatBBDate(lot.bb) + '  LOT: ' + lot.lot + '  (' + lot.qty + ' cs)', L, y);
+        doc.text('BB: ' + lot.bb + '  LOT: ' + lot.lot + '  (' + lot.qty + ' cs)', L, y);
         y += unit * 0.85;
       }
     } else {
-      doc.text('BB: ' + formatBBDate(item.bb || 'TBD') + '  LOT: ' + (item.lot || 'TBD'), L, y);
+      doc.text('BB: ' + (item.bb || 'TBD') + '  LOT: ' + (item.lot || 'TBD'), L, y);
       y += unit * 0.85;
     }
 
@@ -3817,13 +3593,12 @@ function updatePalletTotals(prefix, numPallets, numRows, capacity) {
   buildShipmentSummary(prefix);
 }
 
-
 // ============================================================
 // SHIPMENT SUMMARY & BOL
 // ============================================================
 const BOL_CONSTANTS = {
   shipFrom: { name: 'Panco Foods, Inc. DBA PAN\'S', addr: '302 SE 7th Ave', csz: 'Portland, OR 97214-1201' },
-  weightPerCase: 5.8, // lbs per master case (actual measured weight)
+  weightPerCase: 6, // lbs — based on actual BOLs (5lb product + ~1lb box)
   palletWeight: 40, // lbs
   palletBaseHeight: 6, // inches
   palletDims: '48x40', // inches
@@ -3842,7 +3617,7 @@ const SHIPPING_INSTRUCTIONS = {
   moreno_valley: { type: 'unishippers', transitTime: 'LTL 1-2 days / UPS 3 days', deliveryInstructions: 'Appointment Hrs: 0000-0630 (AM)\nEmail: MORAppts@unfi.com', preferredCarriers: 'Estes - daily drops\nOld Dominion - 2-3 drops/week', doNotUse: 'XPO\nRoadrunner\nForward Air\nTForce', notes: 'Only use preferred carriers due to overnight receiving hours' },
   chesterfield: { type: 'unishippers', transitTime: 'LTL', deliveryInstructions: '', preferredCarriers: 'YRC - 1-2 deliveries per week\nEstes - drops 1 trailer every Tuesday (10-15 days behind)\nOld Dominion - drops trailer about 3 times per week', doNotUse: 'XPO\nSAIA', notes: '' },
   dayville: { type: 'unishippers', transitTime: '', deliveryInstructions: '', preferredCarriers: 'ESTES - Drops 1 trailer every Wednesday', doNotUse: '', notes: 'ONLY USE PREFERRED CARRIERS' },
-  sarasota: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Receiving is 10pm-3am Sun Night - Friday Morning\nsarappts@unfi.com', preferredCarriers: 'Estes\nOld Dominion\nABF', doNotUse: 'SAIA (no answer)', notes: 'Per SARAppts@unfi.com (May 2026): LTL carriers are Estes, Old Dominion, and ABF. FFE for chill only (not applicable to jerky).' },
+  sarasota: { type: 'unishippers', transitTime: '', deliveryInstructions: '', preferredCarriers: 'Estes - 1-2 trailer drops per week (every Thursday + extra)\nOld Dominion - drops about 3 trailers per week\nTforce\nForwardAir\nXPO\nAAA Cooper\nCentral Transport\nR&L', doNotUse: 'SAIA (no answer)', notes: '' },
   aurora_unfi: { type: 'unishippers', transitTime: 'LTL 2-4 days / UPS 2 days', deliveryInstructions: 'Appt hours: M-F 12AM-5AM\nEmail: AURAppts@unfi.com\n(303) 360-8459', preferredCarriers: 'ABF Freight\nEstes - delivers every day or every 2 days (trailer drops and live unloads)\nOld Dominion - delivers every day or two depending on volume', doNotUse: 'YRC\nReddaway\nForward Air\nXpress Global\nR&L\nTforce (HOLD ON USING T-FORCE)', notes: 'Only use preferred carriers' },
   rocklin: { type: 'unishippers', transitTime: 'LTL 2-3 days / UPS 2 days', deliveryInstructions: 'Appointment Hrs: 02:00-08:30 (AM)\nEmail: RocklinAppts@unfi.com', preferredCarriers: 'ABF\nOld Dominion - daily delivery/drops\nSAIA - Tues/Thurs delivery\nReddaway - 3 deliveries/week (usually MWF)\nEstes - confirmed Nov 2023 they deliver to UNFI Rocklin', doNotUse: 'XPO\nRoadrunner\nForward Air\nT-Force', notes: 'Only use preferred carriers due to overnight receiving hours. 2nd option: Estes (books appointments after freight arrives at terminal, 2-4 more days to deliver)' },
   ridgefield: { type: 'unishippers', transitTime: '', deliveryInstructions: 'RidgefieldAppts@unfi.com\nAppt hrs: M-F 2am-8am', preferredCarriers: 'Old Dominion\nEstes', doNotUse: '', notes: '' },
@@ -3859,9 +3634,7 @@ const SHIPPING_INSTRUCTIONS = {
   homegoods: { type: 'fob_pickup', notes: 'HomeGoods arranges their own pick-up. Create internal BOL.' },
   grocery_outlet: { type: 'fob_pickup', notes: 'Grocery Outlet Inbound Traffic coordinates First Mile logistics. Pick Up at Pan\'s. BOL needed.' },
   market_of_choice: { type: 'fob_pickup', notes: 'Market of Choice pickup. Contact: Dan or Vern (541) 683-2834. Delivery to MCDC Warehouse, 1150 Owen Loop South, Eugene OR 97402.' },
-  foundation_foods: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Contact: 949.391.7660 ext 4 (Warehouse & Deliveries)\nEmail: Shipping@foundationfoods.com\nReceiving Hours: Mon-Thurs 9:30am-3:30pm\nNo deliveries on Fridays or weekends', preferredCarriers: '', doNotUse: '', notes: 'Send tracking info and shipment updates to Shipping@foundationfoods.com\nAll quantities on PO are in eaches (not cases)' },
-  snack_guru: { type: 'freight_forwarder', notes: 'International order — Singapore. Freight forwarder arranges pickup and ocean/air shipment. Coordinate with Snack Guru LLP for shipping schedule.' },
-  osjl: { type: 'collect_rts', notes: 'COLLECT freight — Ocean State Job Lot arranges carrier pickup after RTS (Ready To Ship) form is submitted.\n\n⚠️ COMPLIANCE:\n• $200 chargeback if BOL is missing\n• ONE SKU per pallet (no mixing)\n• Max pallet height: 96 inches\n• BOL + packing slip must be emailed to appointments@osjl.com 24 hours before arrival\n• RTS form must be submitted 7 days before shipping' }
+  foundation_foods: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Contact: 949.391.7660 ext 4 (Warehouse & Deliveries)\nEmail: Shipping@foundationfoods.com\nReceiving Hours: Mon-Thurs 9:30am-3:30pm\nNo deliveries on Fridays or weekends', preferredCarriers: '', doNotUse: '', notes: 'Send tracking info and shipment updates to Shipping@foundationfoods.com\nAll quantities on PO are in eaches (not cases)' }
 };
 
 function matchShipToName(shipToName) {
@@ -3889,8 +3662,6 @@ function matchShipToName(shipToName) {
   if (name.includes('homegoods') || name.includes('home goods')) return 'homegoods';
   if (name.includes('grocery outlet')) return 'grocery_outlet';
   if (name.includes('market of choice') || name.includes('mcdc')) return 'market_of_choice';
-  if (name.includes('snack guru')) return 'snack_guru';
-  if (name.includes('ocean state') || name.includes('job lot') || name.includes('osjl')) return 'osjl';
   return null;
 }
 
@@ -3993,89 +3764,6 @@ function buildShippingInstructions(prefix) {
     }
     html += '<button onclick="generateBOL(\'' + prefix + '\')" style="padding:8px 16px; background:#1e40af; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Generate Internal BOL (PDF)</button>';
     html += '</div>';
-  } else if (info.type === 'freight_forwarder') {
-    html += '<div style="margin-top:12px; padding:14px; background:#f5f3ff; border:1px solid #c4b5fd; border-radius:8px;">';
-    html += '<div style="font-weight:700; font-size:14px; margin-bottom:8px; color:#7c3aed;">International / Freight Forwarder</div>';
-    html += '<div style="font-size:12px; margin-bottom:10px;">Freight forwarder arranges pickup and international shipment.</div>';
-    if (info.notes) {
-      html += '<div style="padding:6px 8px; background:#fff; border:1px solid #e5e7eb; border-radius:4px; font-size:12px; margin-bottom:10px;">' + info.notes + '</div>';
-    }
-    html += '</div>';
-  } else if (info.type === 'collect_rts') {
-    // Calculate totals from current PO
-    var totalCases = 0;
-    if (extractedPO && extractedPO.line_items) {
-      extractedPO.line_items.forEach(function(item) { totalCases += parseInt(item.qty) || 0; });
-    }
-    var totalWeight = Math.ceil(totalCases * BOL_CONSTANTS.weightPerCase);
-    var numPallets = parseInt(document.getElementById('totalPallets')?.value) || 1;
-    var todayDate = new Date();
-    var todayStr = (todayDate.getMonth()+1) + '/' + todayDate.getDate() + '/' + todayDate.getFullYear();
-
-    html += '<div style="margin-top:12px; padding:14px; background:#ecfeff; border:1px solid #06b6d4; border-radius:8px;">';
-    html += '<div style="font-weight:700; font-size:14px; margin-bottom:8px; color:#0891b2;">COLLECT / RTS Workflow — Ocean State Job Lot</div>';
-
-    // Compliance warnings
-    html += '<div style="background:#fef2f2; border:1px solid #fca5a5; border-radius:6px; padding:10px; margin-bottom:14px; font-size:12px; color:#991b1b;">';
-    html += '<strong>⚠️ COMPLIANCE REQUIREMENTS:</strong><br>';
-    html += '• <strong>$200 chargeback</strong> if BOL is missing from shipment<br>';
-    html += '• <strong>ONE SKU per pallet</strong> — no mixing flavors on same pallet<br>';
-    html += '• Max pallet height: <strong>96 inches</strong><br>';
-    html += '• BOL + packing slip emailed to appointments@osjl.com <strong>24 hrs before arrival</strong><br>';
-    html += '• RTS form submitted <strong>7 days before shipping</strong>';
-    html += '</div>';
-
-    // Step 1: RTS Form Fields
-    html += '<div style="font-weight:700; font-size:13px; margin-bottom:10px; color:#0e7490;">Step 1: RTS Form — Copy/Paste Fields</div>';
-    html += '<div style="font-size:11px; color:#666; margin-bottom:8px;">Fill in the OSJL RTS form with these values. Use Copy buttons to grab each field.</div>';
-
-    var rtsFields = [
-      { label: "Today\'s Date", value: todayStr },
-      { label: "Terms", value: "COLLECT" },
-      { label: "PO #", value: poNumber },
-      { label: "Load Type", value: "PALLET" },
-      { label: "Double Stack", value: "NO" },
-      { label: "Total Cases", value: String(totalCases) },
-      { label: "Weight (lbs)", value: String(totalWeight) },
-      { label: "Total Pallets", value: String(numPallets) },
-      { label: "Shipper Name", value: "Panco Foods, Inc." },
-      { label: "Shipper Address", value: "302 SE 7th Ave, Portland, OR 97214" },
-      { label: "Shipper Phone", value: "(503) 894-8498" },
-      { label: "Hazmat", value: "NO" },
-      { label: "Reefer", value: "NO" }
-    ];
-
-    html += '<div style="display:grid; grid-template-columns: 120px 1fr auto; gap:4px 8px; align-items:center; margin-bottom:14px;">';
-    rtsFields.forEach(function(f, idx) {
-      var fid = uid + 'rts_' + idx;
-      html += '<div style="font-size:11px; font-weight:600; color:#555;">' + f.label + '</div>';
-      html += '<input id="' + fid + '" readonly value="' + f.value + '" style="padding:4px 8px; border:1px solid #d1d5db; border-radius:4px; font-family:monospace; font-size:12px; background:#f9fafb;">';
-      html += '<button onclick="copyField(\'' + fid + '\')" id="' + fid + '_btn" style="padding:4px 10px; background:#0891b2; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:10px; white-space:nowrap;">Copy</button>';
-    });
-    html += '</div>';
-
-    // Step 2: Email
-    html += '<div style="font-weight:700; font-size:13px; margin-bottom:10px; color:#0e7490;">Step 2: Email RTS Form + BOL</div>';
-    html += '<div style="font-size:11px; color:#666; margin-bottom:8px;">Email the completed RTS form, BOL, and packing slip to OSJL at least 7 days before ship date.</div>';
-
-    var emailTo = 'appointments@osjl.com';
-    var emailSubject = 'PO# ' + poNumber;
-    html += '<div style="display:grid; grid-template-columns: 80px 1fr auto; gap:4px 8px; align-items:center; margin-bottom:14px;">';
-    html += '<div style="font-size:11px; font-weight:600; color:#555;">To:</div>';
-    html += '<input id="' + uid + 'email_to" readonly value="' + emailTo + '" style="padding:4px 8px; border:1px solid #d1d5db; border-radius:4px; font-family:monospace; font-size:12px; background:#f9fafb;">';
-    html += '<button onclick="copyField(\'' + uid + 'email_to\')" id="' + uid + 'email_to_btn" style="padding:4px 10px; background:#0891b2; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:10px;">Copy</button>';
-    html += '<div style="font-size:11px; font-weight:600; color:#555;">Subject:</div>';
-    html += '<input id="' + uid + 'email_subj" readonly value="' + emailSubject + '" style="padding:4px 8px; border:1px solid #d1d5db; border-radius:4px; font-family:monospace; font-size:12px; background:#f9fafb;">';
-    html += '<button onclick="copyField(\'' + uid + 'email_subj\')" id="' + uid + 'email_subj_btn" style="padding:4px 10px; background:#0891b2; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:10px;">Copy</button>';
-    html += '</div>';
-    html += '<div style="font-size:11px; color:#dc2626; font-weight:600; margin-bottom:10px;">📎 Attach: RTS form (PDF) + BOL (generated below) + packing slip</div>';
-
-    // Step 3: Generate BOL
-    html += '<div style="font-weight:700; font-size:13px; margin-bottom:10px; color:#0e7490;">Step 3: Generate BOL</div>';
-    html += '<button onclick="generateBOL(\'' + prefix + '\')" style="padding:10px 20px; background:#1e40af; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600; font-size:13px;">Generate BOL (PDF)</button>';
-    html += '<div style="font-size:11px; color:#666; margin-top:6px;">BOL must include PO# and be emailed 24 hours before carrier arrival.</div>';
-
-    html += '</div>';
   }
 
   div.innerHTML = html;
@@ -4132,7 +3820,7 @@ function getShipmentStats(prefix) {
       palletItems = pd.items;
     }
     const layers = Math.ceil(palletCases / box.perLayer);
-    const productWeight = Math.ceil(palletCases * BOL_CONSTANTS.weightPerCase);
+    const productWeight = palletCases * BOL_CONSTANTS.weightPerCase;
     const totalWeight = productWeight + BOL_CONSTANTS.palletWeight;
     const height = BOL_CONSTANTS.palletBaseHeight + (layers * box.d);
     pallets.push({
@@ -4161,26 +3849,6 @@ function getShipmentStats(prefix) {
     },
     allItems: items
   };
-}
-
-function updateWeightEstimate(prefix) {
-  prefix = prefix || '';
-  var el = document.getElementById('weightEstimate' + (prefix ? prefix : ''));
-  if (!el) el = document.getElementById('weightEstimate');
-  if (!el) return;
-  var items = extractedPO ? extractedPO.line_items : [];
-  if (prefix && prefix.startsWith('_dc')) {
-    var dcIdx = parseInt(prefix.replace('_dc', ''));
-    if (extractedPO && extractedPO.shipments && extractedPO.shipments[dcIdx]) {
-      items = extractedPO.shipments[dcIdx].line_items || [];
-    }
-  }
-  var totalCases = 0;
-  for (var i = 0; i < items.length; i++) totalCases += items[i].qty;
-  var numPallets = parseInt(document.getElementById('totalPallets' + (prefix ? prefix : ''))?.value) || 1;
-  var productWt = Math.ceil(totalCases * BOL_CONSTANTS.weightPerCase);
-  var totalWt = productWt + (numPallets * BOL_CONSTANTS.palletWeight);
-  el.textContent = '≈ ' + totalWt + ' lbs (' + totalCases + ' cases × ' + BOL_CONSTANTS.weightPerCase + ' lb + ' + numPallets + ' pallet' + (numPallets > 1 ? 's' : '') + ')';
 }
 
 function buildShipmentSummary(prefix) {
@@ -4227,7 +3895,7 @@ function buildShipmentSummary(prefix) {
   html += '<td style="padding:4px 8px;">Total</td>';
   html += '<td style="text-align:center; padding:4px 8px;">' + stats.totalCases + '</td>';
   html += '<td style="text-align:center; padding:4px 8px;">—</td>';
-  html += '<td style="text-align:center; padding:4px 8px;">' + Math.ceil(stats.totalCases * BOL_CONSTANTS.weightPerCase) + ' lb</td>';
+  html += '<td style="text-align:center; padding:4px 8px;">' + (stats.totalCases * BOL_CONSTANTS.weightPerCase) + ' lb</td>';
   html += '<td style="text-align:center; padding:4px 8px;">' + stats.totalWeight + ' lb</td>';
   html += '<td style="text-align:center; padding:4px 8px;">—</td>';
   html += '<td style="text-align:center; padding:4px 8px;">—</td>';
@@ -4449,7 +4117,7 @@ function generateBOL(prefix) {
   // # Packages
   cell(M + col1W, y, col2W, rowH, String(stats.totalCases), { bold: true, fs: 11, center: true });
   // Weight
-  cell(M + col1W + col2W, y, col3W, rowH, Math.ceil(stats.totalCases * BOL_CONSTANTS.weightPerCase) + ' lb', { bold: true, fs: 10, center: true });
+  cell(M + col1W + col2W, y, col3W, rowH, (stats.totalCases * BOL_CONSTANTS.weightPerCase) + ' lb', { bold: true, fs: 10, center: true });
   // Pallet Y/N
   doc.rect(M + col1W + col2W + col3W, y, col4W, rowH);
   doc.setFontSize(8);
@@ -4481,7 +4149,7 @@ function generateBOL(prefix) {
   doc.setFontSize(9);
   doc.text(stats.numPallets + ' pallet' + (stats.numPallets > 1 ? 's' : ''), M + col1W - 50, y + 12);
   cell(M + col1W, y, col2W, gtH, String(stats.totalCases), { bold: true, fs: 11, center: true });
-  cell(M + col1W + col2W, y, col3W, gtH, Math.ceil(stats.totalCases * BOL_CONSTANTS.weightPerCase) + ' lb', { bold: true, fs: 10, center: true });
+  cell(M + col1W + col2W, y, col3W, gtH, (stats.totalCases * BOL_CONSTANTS.weightPerCase) + ' lb', { bold: true, fs: 10, center: true });
   cell(M + col1W + col2W + col3W, y, col4W + col5W, gtH, '');
   y += gtH;
 
@@ -4811,7 +4479,6 @@ function buildPalletAssignment(prefix) {
 
   // Refresh shipment summary with per-pallet breakdown
   buildShipmentSummary(prefix);
-  updateWeightEstimate(prefix);
 }
 
 // Refresh lot code labels AND quantities in the pallet assignment table
@@ -5567,7 +5234,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.27c</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.05.21a</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
@@ -5605,7 +5272,6 @@ ssccUpdateDisplay();
         <div><span style="color:#16a34a;">&#9679;</span> Chino, CA</div>
         <div><span style="color:#16a34a;">&#9679;</span> Dallas, TX</div>
         <div><span style="color:#16a34a;">&#9679;</span> Elkton, FL</div>
-        <div><span style="color:#16a34a;">&#9679;</span> Ellettsville, IN</div>
         <div><span style="color:#16a34a;">&#9679;</span> North East, MD</div>
         <div><span style="color:#16a34a;">&#9679;</span> Portland (Beaverton), OR</div>
         <div><span style="color:#16a34a;">&#9679;</span> Stockton, CA</div>
@@ -5649,13 +5315,11 @@ ssccUpdateDisplay();
         <div><span style="color:#16a34a;">&#9679;</span> Foundation Foods (San Clemente, CA)</div>
         <div><span style="color:#16a34a;">&#9679;</span> Market of Choice (Eugene, OR)</div>
         <div><span style="color:#16a34a;">&#9679;</span> Grocery Outlet</div>
-        <div><span style="color:#16a34a;">&#9679;</span> Snack Guru LLP (Singapore)</div>
-        <div><span style="color:#16a34a;">&#9679;</span> Ocean State Job Lot (N. Kingstown, RI)</div>
       </div>
     </div>
 
     <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;font-size:12px;color:#555;">
-      <strong>Shipping instructions available for:</strong> Greenwood, Howell, Moreno Valley, Chesterfield, Dayville, Sarasota, Aurora, Rocklin, Ridgefield, Iowa City, Richburg, Twin Cities, Lancaster, Thrive (all DCs), Foundation Foods, OSJL.
+      <strong>Shipping instructions available for:</strong> Greenwood, Howell, Moreno Valley, Chesterfield, Dayville, Sarasota, Aurora, Rocklin, Ridgefield, Iowa City, Richburg, Twin Cities, Lancaster, Thrive (all DCs), Foundation Foods.
       <br><strong>Missing instructions:</strong> Carlisle, Atlanta, Racine — add via code update.
     </div>
   </div>
