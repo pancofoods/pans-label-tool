@@ -589,12 +589,11 @@ async function pushToRegistry(prefix) {
     return;
   }
 
-  var ABBREV = { 'Original': 'OG', 'Zesty Thai': 'ZT', 'Salt & Pepper': 'SP', 'Applewood BBQ': 'BBQ', 'Teriyaki': 'TER', 'Curry': 'CUR' };
   var assignments = [];
 
   for (var i = 0; i < items.length; i++) {
     var flavor = items[i].flavor;
-    var abbr = ABBREV[flavor] || flavor.substring(0, 3).toUpperCase();
+    var abbr = FLAVOR_TO_ABBREV[flavor] || flavor.substring(0, 3).toUpperCase();
     var qty = parseInt(items[i].qty) || 0;
     if (qty === 0) continue;
 
@@ -1033,19 +1032,17 @@ function buildLotCodeSummary(prefix) {
   }
   if (!items || items.length === 0) { div.style.display = 'none'; return; }
 
-  // Flavor abbreviations
-  var ABBREV = { 'Original': 'OG', 'Zesty Thai': 'ZT', 'Salt & Pepper': 'SP', 'Applewood BBQ': 'BBQ', 'Teriyaki': 'TER' };
-
   var lines = [];
   for (var i = 0; i < items.length; i++) {
     var flavor = items[i].flavor;
-    var abbr = ABBREV[flavor] || flavor.substring(0, 3).toUpperCase();
+    var abbr = FLAVOR_TO_ABBREV[flavor] || flavor.substring(0, 3).toUpperCase();
     var qty = parseInt(items[i].qty) || 0;
     if (qty === 0) continue;
 
     // Convert cases to units: 24 units/case for 2.2oz, 48 for 1oz
     var is1oz = PRODUCTS[flavor] && PRODUCTS[flavor].size === '1oz';
     var unitsPerCase = is1oz ? 48 : 24;
+    var sizePrefix = is1oz ? '1oz ' : '';
 
     var lotsInput = document.getElementById('lots_' + fieldPrefix + i);
     var lotsCount = parseInt(lotsInput?.value) || 1;
@@ -1057,9 +1054,9 @@ function buildLotCodeSummary(prefix) {
         var lotQty = parseInt(document.getElementById('lotqty_' + fieldPrefix + i + '_' + l)?.value) || 0;
         var lotUnits = lotQty * unitsPerCase;
         if (lotCode) {
-          lines.push(abbr + ' ' + lotCode + ' (' + lotUnits + ')');
+          lines.push(sizePrefix + abbr + ' ' + lotCode + ' (' + lotUnits + ')');
         } else {
-          lines.push(abbr + ' [lot ' + (l + 1) + '] (' + lotUnits + ')');
+          lines.push(sizePrefix + abbr + ' [lot ' + (l + 1) + '] (' + lotUnits + ')');
         }
       }
     } else {
@@ -1067,9 +1064,9 @@ function buildLotCodeSummary(prefix) {
       var lotCode = document.getElementById('lot_' + fieldPrefix + i)?.value || '';
       var units = qty * unitsPerCase;
       if (lotCode) {
-        lines.push(abbr + ' ' + lotCode + ' (' + units + ')');
+        lines.push(sizePrefix + abbr + ' ' + lotCode + ' (' + units + ')');
       } else {
-        lines.push(abbr + ' [enter lot code] (' + units + ')');
+        lines.push(sizePrefix + abbr + ' [enter lot code] (' + units + ')');
       }
     }
   }
