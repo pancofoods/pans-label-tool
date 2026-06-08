@@ -424,6 +424,42 @@ function updateRegistryStatus(state) {
   }
 }
 
+// Format a Best-By date for display + label printing.
+// Registry can return ISO timestamps ("2027-02-19T08:00:00.000Z"),
+// "YYYY-MM-DD", "M/D/YY", or already-formatted MM/DD/YY.
+// Normalize all to MM/DD/YY.
+function formatBBDate(raw) {
+  if (!raw) return '';
+  var s = String(raw).trim();
+  if (!s) return '';
+
+  // Already MM/DD/YY or M/D/YY — normalize to MM/DD/YY
+  var slashMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (slashMatch) {
+    var mm = slashMatch[1].padStart(2, '0');
+    var dd = slashMatch[2].padStart(2, '0');
+    var yy = slashMatch[3].length === 4 ? slashMatch[3].slice(2) : slashMatch[3].padStart(2, '0');
+    return mm + '/' + dd + '/' + yy;
+  }
+
+  // ISO timestamp or YYYY-MM-DD — parse as UTC to avoid TZ off-by-one
+  var isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    return isoMatch[2] + '/' + isoMatch[3] + '/' + isoMatch[1].slice(2);
+  }
+
+  // Last resort: let Date parse it
+  var d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    var mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    var dd = String(d.getUTCDate()).padStart(2, '0');
+    var yy = String(d.getUTCFullYear()).slice(2);
+    return mm + '/' + dd + '/' + yy;
+  }
+
+  return s; // unrecognized — leave alone
+}
+
 // Get lots filtered by flavor
 function getLotsForFlavor(flavorName) {
   const abbrev = FLAVOR_TO_ABBREV[flavorName];
@@ -489,14 +525,14 @@ function wrapWithLotPicker(lotInputId, bbInputId, flavorName) {
       item.innerHTML =
         '<span class="lot-flavor" style="background:' + c.bg + ';color:' + c.text + '">' + lot.flavor + '</span>' +
         '<span class="lot-code">#' + lot.lotCode + '</span>' +
-        '<span class="lot-bb">BB: ' + lot.bbDate + '</span>' +
+        '<span class="lot-bb">BB: ' + formatBBDate(lot.bbDate) + '</span>' +
         remainingText;
 
       item.addEventListener('click', function() {
         lotInput.value = lot.lotCode;
         if (bbInputId) {
           const bbInput = document.getElementById(bbInputId);
-          if (bbInput) bbInput.value = lot.bbDate;
+          if (bbInput) bbInput.value = formatBBDate(lot.bbDate);
         }
         dropdown.classList.remove('open');
         // Trigger any existing oninput handlers
