@@ -137,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.08a</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.10a</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -981,8 +981,12 @@ function expandLots(prefix, idx, totalQty, isDC) {
     var dcNum = prefix.replace('_', '');
     palletPrefix = '_dc' + dcNum;
   }
-  // Actually rebuild the pallet assignment with updated lot quantities
-  setTimeout(function() { buildPalletAssignment(palletPrefix); }, 150);
+  // Save current pallet state, rebuild, then restore non-affected rows
+  var savedPallet = savePalletState(palletPrefix);
+  setTimeout(function() {
+    buildPalletAssignment(palletPrefix);
+    if (savedPallet) restorePalletState(palletPrefix, savedPallet, idx);
+  }, 150);
 }
 
 // Auto-adjust other lot quantities when one changes (for 2-lot split)
@@ -4403,6 +4407,93 @@ function generateBOL(prefix) {
   showStatus('batchStatus', 'Saved ' + fn, 'success');
 }
 
+// Save current pallet assignment values from the DOM before a rebuild
+function savePalletState(prefix) {
+  prefix = prefix || '';
+  var div = document.getElementById('palletAssignment' + prefix);
+  if (!div || div.style.display === 'none' || !div.innerHTML.trim()) return null;
+
+  var rows = div._palletRows;
+  if (!rows || rows.length === 0) return null;
+
+  var palletsInputId;
+  if (prefix.startsWith('_dc')) {
+    var dcIdx = prefix.replace('_dc', '');
+    palletsInputId = 'pallets_' + dcIdx;
+  } else {
+    palletsInputId = 'totalPallets';
+  }
+  var numPallets = parseInt(document.getElementById(palletsInputId)?.value) || 1;
+
+  var state = { numPallets: numPallets, rows: [], values: [] };
+  for (var r = 0; r < rows.length; r++) {
+    state.rows.push({
+      flavor: rows[r].flavor,
+      itemIdx: rows[r].itemIdx,
+      lotIdx: rows[r].lotIdx,
+      isSubLot: rows[r].isSubLot,
+      qty: rows[r].qty
+    });
+  }
+  for (var p = 0; p < numPallets; p++) {
+    state.values[p] = [];
+    for (var r2 = 0; r2 < rows.length; r2++) {
+      state.values[p][r2] = parseInt(document.getElementById('pa' + prefix + '_' + p + '_' + r2)?.value) || 0;
+    }
+  }
+  return state;
+}
+
+// Restore pallet assignment values after a rebuild
+// changedItemIdx: if a number, only restore rows NOT matching this itemIdx (the split item)
+//                 if null/undefined, restore ALL rows (used by Reload Lots)
+function restorePalletState(prefix, savedState, changedItemIdx) {
+  if (!savedState) return;
+  prefix = prefix || '';
+
+  var div = document.getElementById('palletAssignment' + prefix);
+  if (!div) return;
+
+  var newRows = div._palletRows;
+  if (!newRows) return;
+
+  var palletsInputId;
+  if (prefix.startsWith('_dc')) {
+    var dcIdx2 = prefix.replace('_dc', '');
+    palletsInputId = 'pallets_' + dcIdx2;
+  } else {
+    palletsInputId = 'totalPallets';
+  }
+  var currentPallets = parseInt(document.getElementById(palletsInputId)?.value) || 1;
+  var maxPallets = Math.min(savedState.numPallets, currentPallets);
+
+  for (var newR = 0; newR < newRows.length; newR++) {
+    var nr = newRows[newR];
+
+    // Skip rows for the changed item — let auto-split handle those
+    if (changedItemIdx !== null && changedItemIdx !== undefined && nr.itemIdx === changedItemIdx) continue;
+
+    // Find matching old row by flavor + itemIdx + lotIdx + isSubLot
+    for (var oldR = 0; oldR < savedState.rows.length; oldR++) {
+      var or_ = savedState.rows[oldR];
+      if (or_.flavor === nr.flavor && or_.itemIdx === nr.itemIdx &&
+          or_.lotIdx === nr.lotIdx && or_.isSubLot === nr.isSubLot) {
+        for (var p = 0; p < maxPallets; p++) {
+          var input = document.getElementById('pa' + prefix + '_' + p + '_' + newR);
+          if (input) input.value = savedState.values[p][oldR];
+        }
+        break;
+      }
+    }
+  }
+
+  // Recalculate totals and check indicators
+  var po = extractedPO;
+  var noDisplay = po ? (po.noDisplay || false) : false;
+  var capacity = noDisplay ? 304 : 130;
+  updatePalletTotals(prefix, currentPallets, newRows.length, capacity);
+}
+
 function buildPalletAssignment(prefix) {
   prefix = prefix || '';
   const div = document.getElementById('palletAssignment' + prefix);
@@ -4518,7 +4609,10 @@ function buildPalletAssignment(prefix) {
 // Fully rebuilds the pallet table so lot qty changes are reflected
 function refreshPalletLotLabels(prefix) {
   prefix = prefix || '';
+  // Save ALL pallet assignments, rebuild to pick up new lot labels, then restore everything
+  var saved = savePalletState(prefix);
   buildPalletAssignment(prefix);
+  if (saved) restorePalletState(prefix, saved, null);
 }
 
 // Read pallet assignment data from the UI for a given pallet index
@@ -5267,7 +5361,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.08a</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.10a</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
