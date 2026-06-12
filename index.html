@@ -3635,11 +3635,11 @@ function updatePalletTotals(prefix, numPallets, numRows, capacity) {
 // ============================================================
 const BOL_CONSTANTS = {
   shipFrom: { name: 'Panco Foods, Inc. DBA PAN\'S', addr: '302 SE 7th Ave', csz: 'Portland, OR 97214-1201' },
-  weightPerCase: 6, // lbs — based on actual BOLs (5lb product + ~1lb box)
+  weightPerCase: 5, // lbs gross per master case (actual 5.15, rounded down)
   palletWeight: 40, // lbs
-  palletBaseHeight: 6, // inches
+  palletBaseHeight: 6, // inches (standard GMA pallet)
   palletDims: '48x40', // inches
-  standardBox: { w: 16, h: 12, d: 6, perLayer: 10 }, // 16x12x6, 10 per layer
+  standardBox: { w: 16.25, h: 12.25, d: 6.75, perLayer: 10 }, // 16.25x12.25x6.75 outer dims, 10 per layer
   noDisplayBox: { w: 12, h: 10, d: 4, perLayer: 16 }, // 12x10x4, 16 per layer
   unitsPerCase: 24,
   freightClass: 125
@@ -3898,7 +3898,7 @@ function buildShipmentSummary(prefix) {
   if (!stats || stats.totalCases === 0) { div.style.display = 'none'; return; }
 
   const box = stats.box;
-  const boxLabel = stats.noDisplay ? '12×10×4"' : '16×12×6"';
+  const boxLabel = stats.noDisplay ? '12×10×4"' : '16.25×12.25×6.75"';
 
   let html = '<div style="margin-top:8px; padding:12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px;">';
   html += '<div style="font-weight:600; margin-bottom:8px; font-size:14px;">Shipment Summary</div>';
