@@ -138,7 +138,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.16c</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.16d</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -2410,110 +2410,129 @@ function parsePO(text) {
       }
     }
   } else if (isOSJL) {
-    // OSJL POs (often OCR'd from scanned images)
-    // PO line format: "2400 1 100 24 100 342346 00201 JERKY 2.2OZ MUSHROOM ORIGINAL 3.1500 EA 3.1500"
-    // OCR can garble characters, merge/split lines, misread & as 8, etc.
+    // OSJL POs — often OCR'd from scanned images
+    // Actual OCR output for data lines (very messy):
+    //   "1 | 100 | as 4100 342346 201 [JERKY 2.207 MUSHROOM ORIGINAL 3.1500_| EA 3.1500"
+    //   "2 400 24 400 342349 00226 JERKY 2.202 MUSHROOM TERIYAKI 3.1600 _| EA| 3.1500"
+    //   "3 100 24 100 347162 00206 [JERKY 2.20Z BBQ APPLEWOOD 3.1500_| EA] 3.1500"
+    //   "4 100. 24 100. 347163, 00204 JERKY 2.20Z SALT & PEPPER 3.1500_| EA| 3.1500"
+    // Total pieces (2400) appear separately at top of OCR output.
     console.log('[OSJL Parser] Full text:\n' + text);
 
-    // Flavor patterns — very loose for OCR tolerance
-    const flavorKeywords = {
-      'Original':     /ORIG|ORIGNL|0RIGINAL|0RIG/i,
-      'Teriyaki':     /TERIY|TERI\s*Y|TERIAKI|TER1Y/i,
-      'Applewood BBQ':/APPLE|APLW|BBQ|B\.?B\.?Q|APPLEWOO/i,
-      'Salt & Pepper': /SALT|PEPPER|S\s*[&8]\s*P|SLT|PPR/i,
-      'Curry':        /CURRY|CURRV/i,
-      'Zesty Thai':   /ZEST|THAI|ZSTY/i
-    };
-
-    // OSJL SKU → flavor mapping (OCR-friendly: these 6-digit numbers are reliable)
-    const osjlSkuMap = {
+    // OSJL SKU → flavor mapping
+    var osjlSkuMap = {
       '342346': 'Original',
       '342349': 'Teriyaki',
       '347162': 'Applewood BBQ',
       '347163': 'Salt & Pepper'
     };
 
-    // Strategy 1: Find OSJL SKU numbers in text — most reliable since numbers OCR well
-    for (const [osjlSku, flavor] of Object.entries(osjlSkuMap)) {
-      const skuPattern = new RegExp('(\\d{2,5})\\s+(?:\\d+\\s+)?' + osjlSku, 'g');
-      var skuM;
-      while ((skuM = skuPattern.exec(text)) !== null) {
-        if (!line_items.some(li => li.flavor === flavor)) {
-          // Number right before SKU is "Cases per Pallet" column
-          var qty = parseInt(skuM[1]);
-          // If we got 24 (inner pack count), look further back for the case qty
-          if (qty === 24) {
-            var before = text.substring(Math.max(0, skuM.index - 50), skuM.index);
-            var prevNums = before.match(/(\d{2,4})\s+24\s*$/);
-            if (prevNums) qty = parseInt(prevNums[1]);
+    // Flavor keyword patterns (very loose for OCR)
+    var osjlFlavorPatterns = {
+      'Original':      /ORIG|MUSHROOM\s*ORIG|0RIGINAL/i,
+      'Teriyaki':      /TERIY|TERI\s*Y|TERIAKI|TER1Y/i,
+      'Applewood BBQ': /APPLE|BBQ|B\.?B\.?Q/i,
+      'Salt & Pepper': /SALT|PEPPER/i,
+      'Curry':         /CURRY|CURRV/i,
+      'Zesty Thai':    /ZEST|THAI|ZSTY/i
+    };
+
+    // Step 1: Calculate default case qty from Total Pieces
+    // OCR puts "2400\n2400\n2400\n2400" at the top (Total Pieces column)
+    var defaultCaseQty = 0;
+    var totalPcsMatches = text.match(/^(\d{3,5})\s*$/gm);
+    if (totalPcsMatches && totalPcsMatches.length > 0) {
+      var tp = parseInt(totalPcsMatches[0].trim());
+      if (tp >= 240 && tp % 24 === 0) {
+        defaultCaseQty = tp / 24;
+        console.log('[OSJL] Default case qty from total pieces: ' + tp + '/24 = ' + defaultCaseQty);
+      }
+    }
+
+    // Step 2: Find OSJL SKU numbers in text (most reliable — digits OCR well)
+    for (var osjlSku in osjlSkuMap) {
+      // Match SKU with possible OCR noise (commas, periods, spaces in digits)
+      var skuClean = osjlSku;
+      var skuIdx = text.indexOf(skuClean);
+      if (skuIdx < 0) {
+        // Try with space/comma variations: "347 162" or "347,163"
+        var skuLoose = osjlSku.substring(0, 3) + '[\\s,.]?' + osjlSku.substring(3);
+        var looseMatch = text.match(new RegExp(skuLoose));
+        if (looseMatch) skuIdx = looseMatch.index;
+      }
+      if (skuIdx >= 0) {
+        var flavor = osjlSkuMap[osjlSku];
+        if (!line_items.some(function(li) { return li.flavor === flavor; })) {
+          // Try to find case qty: look at numbers before the SKU on same line
+          var lineStart = text.lastIndexOf('\n', skuIdx);
+          var lineEnd = text.indexOf('\n', skuIdx);
+          if (lineEnd < 0) lineEnd = text.length;
+          var theLine = text.substring(lineStart + 1, lineEnd);
+          var qty = 0;
+
+          // Look for "100" or similar 2-4 digit number before the SKU on this line
+          var beforeSku = theLine.substring(0, theLine.indexOf(osjlSku.substring(0, 4)));
+          // Extract all numbers from before the SKU, pick the best candidate
+          var beforeNums = beforeSku.match(/\d+/g);
+          if (beforeNums) {
+            for (var bi = beforeNums.length - 1; bi >= 0; bi--) {
+              var bv = parseInt(beforeNums[bi]);
+              if (bv >= 20 && bv <= 2000 && bv !== 24 && bv !== 22) {
+                qty = bv;
+                break;
+              }
+            }
           }
-          // Validate: skip obviously wrong numbers (line numbers, prices)
-          if (qty > 0 && qty !== 24 && qty < 5000) {
-            line_items.push({ flavor, qty });
-            console.log('[OSJL] SKU ' + osjlSku + ' → ' + flavor + ' × ' + qty);
+
+          // If no good qty found, or got a suspicious number, use default
+          if (!qty || qty > 1000) qty = defaultCaseQty;
+
+          // Last resort: count "2400" entries at top (one per line item)
+          if (!qty) qty = 100;
+
+          line_items.push({ flavor: flavor, qty: qty });
+          console.log('[OSJL] SKU ' + osjlSku + ' → ' + flavor + ' × ' + qty);
+        }
+      }
+    }
+
+    // Step 3: If SKU matching missed items, try flavor keywords
+    if (line_items.length < 4) {
+      var lines = text.split('\n');
+      for (var li = 0; li < lines.length; li++) {
+        var line = lines[li];
+        // Only process lines that look like data rows (contain JERKY or have numbers + description)
+        if (!/JERKY|MUSHROOM|2\.2/i.test(line)) continue;
+        for (var flav in osjlFlavorPatterns) {
+          if (osjlFlavorPatterns[flav].test(line) && !line_items.some(function(x) { return x.flavor === flav; })) {
+            var qty = defaultCaseQty || 100;
+            // Try to extract specific qty from this line
+            var cleanLine = line.replace(/\d+\.\d{2,}/g, '').replace(/\d+[oOzZ]+/g, '');
+            var lineNums = cleanLine.match(/\b(\d{2,4})\b/g);
+            if (lineNums) {
+              for (var ni = 0; ni < lineNums.length; ni++) {
+                var nv = parseInt(lineNums[ni]);
+                if (nv >= 20 && nv <= 2000 && nv !== 24 && nv !== 22) { qty = nv; break; }
+              }
+            }
+            line_items.push({ flavor: flav, qty: qty });
+            console.log('[OSJL] Keyword "' + flav + '" → qty ' + qty);
           }
         }
       }
     }
 
-    // Strategy 2: Scan lines for flavor keywords + extract quantity
+    // Step 4: Try PMJ UPCs as last resort
     if (line_items.length === 0) {
-      const lines = text.split('\n');
-      for (const line of lines) {
-        // Skip header/label lines
-        if (/ITEM\s*DESC|FLAVOR|^[\s]*$/i.test(line)) continue;
-        for (const [flavor, pattern] of Object.entries(flavorKeywords)) {
-          if (pattern.test(line) && !line_items.some(li => li.flavor === flavor)) {
-            var qty = 0;
-
-            // Method A: Total pieces / 24 = master cases (2400/24=100)
-            // Total pieces is the big number (1000+) at start of line
-            var totalPcsMatch = line.match(/(?:^|\s)(\d{3,5})(?:\s+\d{1,2}\s+(\d{2,4})\s)/);
-            if (totalPcsMatch) {
-              var totalPcs = parseInt(totalPcsMatch[1]);
-              var directQty = parseInt(totalPcsMatch[2]);
-              // If total pieces is divisible by 24, use that
-              if (totalPcs >= 240 && totalPcs % 24 === 0) {
-                qty = totalPcs / 24;
-              } else if (directQty > 0 && directQty !== 24) {
-                qty = directQty;
-              }
-            }
-
-            // Method B: Find standalone numbers, excluding prices and sizes
-            // Strip out price-like patterns (3.1500, 2.20Z etc.) before scanning
-            if (!qty) {
-              var cleanLine = line.replace(/\d+\.\d{2,}/g, '').replace(/\d+[oOzZ]+/g, '');
-              var nums = cleanLine.match(/(?<!\.)(\d{2,4})(?![\d.])/g);
-              if (nums) {
-                for (var n of nums) {
-                  var v = parseInt(n);
-                  // Skip: inner pack (24), line numbers (1-18), total pieces (2400+)
-                  if (v >= 20 && v <= 2000 && v !== 24 && v !== 22) { qty = v; break; }
-                }
-              }
-            }
-
-            if (qty > 0) {
-              line_items.push({ flavor, qty });
-              console.log('[OSJL] Keyword "' + flavor + '" → qty ' + qty + ' from line: ' + line.substring(0, 80));
-            }
-          }
-        }
-      }
-    }
-
-    // Strategy 3: Try PMJ UPCs
-    if (line_items.length === 0) {
-      for (const [upc, flavor] of Object.entries(UPC_MAP)) {
-        const upcIdx = text.indexOf(upc);
+      for (var upc in UPC_MAP) {
+        var upcIdx = text.indexOf(upc);
         if (upcIdx >= 0) {
-          const nearby = text.substring(Math.max(0, upcIdx - 200), Math.min(upcIdx + 200, text.length));
-          const qtyMatch = nearby.match(/(\d+)\s*(?:case|cs|ea|each|units?|qty)/i) || nearby.match(/(?:qty|quantity|ordered)\s*:?\s*(\d+)/i);
+          var nearby = text.substring(Math.max(0, upcIdx - 200), Math.min(upcIdx + 200, text.length));
+          var qtyMatch = nearby.match(/(\d+)\s*(?:case|cs|ea|each|units?|qty)/i);
           if (qtyMatch) {
-            const qty = parseInt(qtyMatch[1]);
-            if (qty > 0 && !line_items.some(li => li.flavor === flavor)) {
-              line_items.push({ flavor, qty });
+            var qty = parseInt(qtyMatch[1]);
+            if (qty > 0 && !line_items.some(function(x) { return x.flavor === UPC_MAP[upc]; })) {
+              line_items.push({ flavor: UPC_MAP[upc], qty: qty });
             }
           }
         }
@@ -5684,7 +5703,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.16c</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.16d</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
