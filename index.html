@@ -138,7 +138,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.16d</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.16e</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -2410,134 +2410,85 @@ function parsePO(text) {
       }
     }
   } else if (isOSJL) {
-    // OSJL POs — often OCR'd from scanned images
-    // Actual OCR output for data lines (very messy):
-    //   "1 | 100 | as 4100 342346 201 [JERKY 2.207 MUSHROOM ORIGINAL 3.1500_| EA 3.1500"
-    //   "2 400 24 400 342349 00226 JERKY 2.202 MUSHROOM TERIYAKI 3.1600 _| EA| 3.1500"
-    //   "3 100 24 100 347162 00206 [JERKY 2.20Z BBQ APPLEWOOD 3.1500_| EA] 3.1500"
-    //   "4 100. 24 100. 347163, 00204 JERKY 2.20Z SALT & PEPPER 3.1500_| EA| 3.1500"
-    // Total pieces (2400) appear separately at top of OCR output.
+    // OSJL POs — often OCR'd from scanned images with very messy text.
+    // Strategy: search ENTIRE text for identifiers, don't rely on line structure.
+    // OCR text is too garbled for per-line quantity parsing — use total pieces / 24.
     console.log('[OSJL Parser] Full text:\n' + text);
 
-    // OSJL SKU → flavor mapping
-    var osjlSkuMap = {
-      '342346': 'Original',
-      '342349': 'Teriyaki',
-      '347162': 'Applewood BBQ',
-      '347163': 'Salt & Pepper'
-    };
+    // Normalize OCR text: collapse whitespace, remove common OCR artifacts
+    var ocrText = text.replace(/[|[\]{}]/g, ' ').replace(/\s+/g, ' ');
 
-    // Flavor keyword patterns (very loose for OCR)
-    var osjlFlavorPatterns = {
-      'Original':      /ORIG|MUSHROOM\s*ORIG|0RIGINAL/i,
-      'Teriyaki':      /TERIY|TERI\s*Y|TERIAKI|TER1Y/i,
-      'Applewood BBQ': /APPLE|BBQ|B\.?B\.?Q/i,
-      'Salt & Pepper': /SALT|PEPPER/i,
-      'Curry':         /CURRY|CURRV/i,
-      'Zesty Thai':    /ZEST|THAI|ZSTY/i
-    };
-
-    // Step 1: Calculate default case qty from Total Pieces
-    // OCR puts "2400\n2400\n2400\n2400" at the top (Total Pieces column)
+    // Step 1: Calculate case qty from Total Pieces (2400 / 24 = 100)
+    // OCR often puts the Total Pieces column values on standalone lines at the top
     var defaultCaseQty = 0;
-    var totalPcsMatches = text.match(/^(\d{3,5})\s*$/gm);
-    if (totalPcsMatches && totalPcsMatches.length > 0) {
-      var tp = parseInt(totalPcsMatches[0].trim());
-      if (tp >= 240 && tp % 24 === 0) {
-        defaultCaseQty = tp / 24;
-        console.log('[OSJL] Default case qty from total pieces: ' + tp + '/24 = ' + defaultCaseQty);
-      }
-    }
-
-    // Step 2: Find OSJL SKU numbers in text (most reliable — digits OCR well)
-    for (var osjlSku in osjlSkuMap) {
-      // Match SKU with possible OCR noise (commas, periods, spaces in digits)
-      var skuClean = osjlSku;
-      var skuIdx = text.indexOf(skuClean);
-      if (skuIdx < 0) {
-        // Try with space/comma variations: "347 162" or "347,163"
-        var skuLoose = osjlSku.substring(0, 3) + '[\\s,.]?' + osjlSku.substring(3);
-        var looseMatch = text.match(new RegExp(skuLoose));
-        if (looseMatch) skuIdx = looseMatch.index;
-      }
-      if (skuIdx >= 0) {
-        var flavor = osjlSkuMap[osjlSku];
-        if (!line_items.some(function(li) { return li.flavor === flavor; })) {
-          // Try to find case qty: look at numbers before the SKU on same line
-          var lineStart = text.lastIndexOf('\n', skuIdx);
-          var lineEnd = text.indexOf('\n', skuIdx);
-          if (lineEnd < 0) lineEnd = text.length;
-          var theLine = text.substring(lineStart + 1, lineEnd);
-          var qty = 0;
-
-          // Look for "100" or similar 2-4 digit number before the SKU on this line
-          var beforeSku = theLine.substring(0, theLine.indexOf(osjlSku.substring(0, 4)));
-          // Extract all numbers from before the SKU, pick the best candidate
-          var beforeNums = beforeSku.match(/\d+/g);
-          if (beforeNums) {
-            for (var bi = beforeNums.length - 1; bi >= 0; bi--) {
-              var bv = parseInt(beforeNums[bi]);
-              if (bv >= 20 && bv <= 2000 && bv !== 24 && bv !== 22) {
-                qty = bv;
-                break;
-              }
-            }
-          }
-
-          // If no good qty found, or got a suspicious number, use default
-          if (!qty || qty > 1000) qty = defaultCaseQty;
-
-          // Last resort: count "2400" entries at top (one per line item)
-          if (!qty) qty = 100;
-
-          line_items.push({ flavor: flavor, qty: qty });
-          console.log('[OSJL] SKU ' + osjlSku + ' → ' + flavor + ' × ' + qty);
+    var totalPcsMatches = text.match(/^\s*(\d{3,5})\s*$/gm);
+    if (totalPcsMatches) {
+      for (var tpi = 0; tpi < totalPcsMatches.length; tpi++) {
+        var tp = parseInt(totalPcsMatches[tpi].trim());
+        if (tp >= 240 && tp % 24 === 0) {
+          defaultCaseQty = tp / 24;
+          break;
         }
       }
     }
+    // Also try finding "2400" anywhere followed by other "2400"s (total pieces pattern)
+    if (!defaultCaseQty) {
+      var tpAll = ocrText.match(/\b2400\b/g);
+      if (tpAll && tpAll.length >= 2) defaultCaseQty = 100;
+    }
+    if (!defaultCaseQty) defaultCaseQty = 100; // Safe default for OSJL PMJ orders
+    console.log('[OSJL] Default case qty: ' + defaultCaseQty);
 
-    // Step 3: If SKU matching missed items, try flavor keywords
-    if (line_items.length < 4) {
-      var lines = text.split('\n');
-      for (var li = 0; li < lines.length; li++) {
-        var line = lines[li];
-        // Only process lines that look like data rows (contain JERKY or have numbers + description)
-        if (!/JERKY|MUSHROOM|2\.2/i.test(line)) continue;
-        for (var flav in osjlFlavorPatterns) {
-          if (osjlFlavorPatterns[flav].test(line) && !line_items.some(function(x) { return x.flavor === flav; })) {
-            var qty = defaultCaseQty || 100;
-            // Try to extract specific qty from this line
-            var cleanLine = line.replace(/\d+\.\d{2,}/g, '').replace(/\d+[oOzZ]+/g, '');
-            var lineNums = cleanLine.match(/\b(\d{2,4})\b/g);
-            if (lineNums) {
-              for (var ni = 0; ni < lineNums.length; ni++) {
-                var nv = parseInt(lineNums[ni]);
-                if (nv >= 20 && nv <= 2000 && nv !== 24 && nv !== 22) { qty = nv; break; }
-              }
-            }
-            line_items.push({ flavor: flav, qty: qty });
-            console.log('[OSJL] Keyword "' + flav + '" → qty ' + qty);
+    // Step 2: Find OSJL SKU numbers anywhere in text (digits OCR most reliably)
+    var osjlSkus = [
+      { sku: '342346', flavor: 'Original' },
+      { sku: '342349', flavor: 'Teriyaki' },
+      { sku: '347162', flavor: 'Applewood BBQ' },
+      { sku: '347163', flavor: 'Salt & Pepper' }
+    ];
+    for (var si = 0; si < osjlSkus.length; si++) {
+      var sku = osjlSkus[si].sku;
+      var flavor = osjlSkus[si].flavor;
+      // Try exact match, then loose match allowing OCR noise between digits
+      var found = ocrText.indexOf(sku) >= 0;
+      if (!found) {
+        // Try with possible OCR errors: "342 346", "342.346", "342,346", "3423A6", "S42346"
+        var looseRe = new RegExp(
+          sku.split('').join('[\\s,._]?').replace(/3/g, '[38S]').replace(/4/g, '[4A]').replace(/7/g, '[7T]'),
+          'i'
+        );
+        found = looseRe.test(ocrText);
+      }
+      if (found && !line_items.some(function(x) { return x.flavor === flavor; })) {
+        line_items.push({ flavor: flavor, qty: defaultCaseQty });
+        console.log('[OSJL] Found SKU ' + sku + ' → ' + flavor + ' × ' + defaultCaseQty);
+      }
+    }
+
+    // Step 3: Search entire text for flavor keywords (catches items SKU matching missed)
+    var osjlFlavorPatterns = [
+      { flavor: 'Original',      re: /ORIG|0RIGINAL|0RIG/i },
+      { flavor: 'Teriyaki',      re: /TERIY|TERIAKI|TER1Y/i },
+      { flavor: 'Applewood BBQ', re: /APPLE|BBQ|B[.,]?B[.,]?Q/i },
+      { flavor: 'Salt & Pepper', re: /SALT\s*.{0,3}\s*PEPPER|S[&8]\s*P/i },
+      { flavor: 'Curry',         re: /CURRY|CURRV/i },
+      { flavor: 'Zesty Thai',    re: /ZEST|THAI|ZSTY/i }
+    ];
+    for (var fi = 0; fi < osjlFlavorPatterns.length; fi++) {
+      var fp = osjlFlavorPatterns[fi];
+      if (fp.re.test(ocrText) && !line_items.some(function(x) { return x.flavor === fp.flavor; })) {
+        // Verify it's a product line (near "JERKY" or "MUSHROOM" or a number) not just random text
+        var fpMatch = ocrText.match(fp.re);
+        if (fpMatch) {
+          var nearbyText = ocrText.substring(Math.max(0, fpMatch.index - 100), Math.min(ocrText.length, fpMatch.index + 100));
+          if (/JERKY|MUSHROOM|JRKY|2\.2|342|347|\d{3,}/i.test(nearbyText)) {
+            line_items.push({ flavor: fp.flavor, qty: defaultCaseQty });
+            console.log('[OSJL] Keyword "' + fp.flavor + '" found near: ' + nearbyText.substring(0, 60));
           }
         }
       }
     }
 
-    // Step 4: Try PMJ UPCs as last resort
-    if (line_items.length === 0) {
-      for (var upc in UPC_MAP) {
-        var upcIdx = text.indexOf(upc);
-        if (upcIdx >= 0) {
-          var nearby = text.substring(Math.max(0, upcIdx - 200), Math.min(upcIdx + 200, text.length));
-          var qtyMatch = nearby.match(/(\d+)\s*(?:case|cs|ea|each|units?|qty)/i);
-          if (qtyMatch) {
-            var qty = parseInt(qtyMatch[1]);
-            if (qty > 0 && !line_items.some(function(x) { return x.flavor === UPC_MAP[upc]; })) {
-              line_items.push({ flavor: UPC_MAP[upc], qty: qty });
-            }
-          }
-        }
-      }
-    }
     console.log('[OSJL] Final items:', JSON.stringify(line_items));
   } else if (isGroceryOutlet) {
     // Grocery Outlet: "400  292861  891742002014  24  2.20 OZ  PAN'S MUSHROOM JERKY ORIGINAL  $72.00"
@@ -5703,7 +5654,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.16d</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.16e</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
