@@ -138,7 +138,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.16e</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.16f</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -1411,7 +1411,7 @@ async function processPO(file) {
           var ocrText = '';
           for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
-            const viewport = page.getViewport({ scale: 2.0 });
+            const viewport = page.getViewport({ scale: 3.0 });
             const canvas = document.createElement('canvas');
             canvas.width = viewport.width;
             canvas.height = viewport.height;
@@ -2410,86 +2410,79 @@ function parsePO(text) {
       }
     }
   } else if (isOSJL) {
-    // OSJL POs — often OCR'd from scanned images with very messy text.
-    // Strategy: search ENTIRE text for identifiers, don't rely on line structure.
-    // OCR text is too garbled for per-line quantity parsing — use total pieces / 24.
-    console.log('[OSJL Parser] Full text:\n' + text);
+    // OSJL POs — OCR'd from scanned images. Text is very messy.
+    // Simple strategy: find flavor words ANYWHERE in entire text, use calculated qty.
+    console.log('[OSJL Parser] Full text (' + text.length + ' chars):\n' + text.substring(0, 2000));
 
-    // Normalize OCR text: collapse whitespace, remove common OCR artifacts
-    var ocrText = text.replace(/[|[\]{}]/g, ' ').replace(/\s+/g, ' ');
-
-    // Step 1: Calculate case qty from Total Pieces (2400 / 24 = 100)
-    // OCR often puts the Total Pieces column values on standalone lines at the top
-    var defaultCaseQty = 0;
-    var totalPcsMatches = text.match(/^\s*(\d{3,5})\s*$/gm);
-    if (totalPcsMatches) {
-      for (var tpi = 0; tpi < totalPcsMatches.length; tpi++) {
-        var tp = parseInt(totalPcsMatches[tpi].trim());
-        if (tp >= 240 && tp % 24 === 0) {
-          defaultCaseQty = tp / 24;
+    // Calculate case qty: count "2400" occurrences (total pieces per item), divide by 24
+    var defaultQty = 100; // Safe default
+    var tp2400 = (text.match(/2400/g) || []).length;
+    if (tp2400 >= 2) defaultQty = 100; // 2400 pieces / 24 per case = 100
+    var tpMatch = text.match(/\b(\d{4,5})\b/g);
+    if (tpMatch) {
+      for (var ti = 0; ti < tpMatch.length; ti++) {
+        var tpv = parseInt(tpMatch[ti]);
+        if (tpv >= 240 && tpv <= 50000 && tpv % 24 === 0 && tpv !== 2026) {
+          defaultQty = tpv / 24;
           break;
         }
       }
     }
-    // Also try finding "2400" anywhere followed by other "2400"s (total pieces pattern)
-    if (!defaultCaseQty) {
-      var tpAll = ocrText.match(/\b2400\b/g);
-      if (tpAll && tpAll.length >= 2) defaultCaseQty = 100;
-    }
-    if (!defaultCaseQty) defaultCaseQty = 100; // Safe default for OSJL PMJ orders
-    console.log('[OSJL] Default case qty: ' + defaultCaseQty);
+    console.log('[OSJL] Default qty: ' + defaultQty);
 
-    // Step 2: Find OSJL SKU numbers anywhere in text (digits OCR most reliably)
-    var osjlSkus = [
-      { sku: '342346', flavor: 'Original' },
-      { sku: '342349', flavor: 'Teriyaki' },
-      { sku: '347162', flavor: 'Applewood BBQ' },
-      { sku: '347163', flavor: 'Salt & Pepper' }
+    // Search entire text for OSJL SKUs (most reliable)
+    var osjlItems = [
+      ['342346', 'Original'],
+      ['342349', 'Teriyaki'],
+      ['347162', 'Applewood BBQ'],
+      ['347163', 'Salt & Pepper']
     ];
-    for (var si = 0; si < osjlSkus.length; si++) {
-      var sku = osjlSkus[si].sku;
-      var flavor = osjlSkus[si].flavor;
-      // Try exact match, then loose match allowing OCR noise between digits
-      var found = ocrText.indexOf(sku) >= 0;
-      if (!found) {
-        // Try with possible OCR errors: "342 346", "342.346", "342,346", "3423A6", "S42346"
-        var looseRe = new RegExp(
-          sku.split('').join('[\\s,._]?').replace(/3/g, '[38S]').replace(/4/g, '[4A]').replace(/7/g, '[7T]'),
-          'i'
-        );
-        found = looseRe.test(ocrText);
-      }
-      if (found && !line_items.some(function(x) { return x.flavor === flavor; })) {
-        line_items.push({ flavor: flavor, qty: defaultCaseQty });
-        console.log('[OSJL] Found SKU ' + sku + ' → ' + flavor + ' × ' + defaultCaseQty);
+    for (var si = 0; si < osjlItems.length; si++) {
+      if (text.indexOf(osjlItems[si][0]) >= 0) {
+        line_items.push({ flavor: osjlItems[si][1], qty: defaultQty });
+        console.log('[OSJL] SKU ' + osjlItems[si][0] + ' → ' + osjlItems[si][1]);
       }
     }
 
-    // Step 3: Search entire text for flavor keywords (catches items SKU matching missed)
-    var osjlFlavorPatterns = [
-      { flavor: 'Original',      re: /ORIG|0RIGINAL|0RIG/i },
-      { flavor: 'Teriyaki',      re: /TERIY|TERIAKI|TER1Y/i },
-      { flavor: 'Applewood BBQ', re: /APPLE|BBQ|B[.,]?B[.,]?Q/i },
-      { flavor: 'Salt & Pepper', re: /SALT\s*.{0,3}\s*PEPPER|S[&8]\s*P/i },
-      { flavor: 'Curry',         re: /CURRY|CURRV/i },
-      { flavor: 'Zesty Thai',    re: /ZEST|THAI|ZSTY/i }
+    // Search entire text for flavor keywords (no proximity check — just find them)
+    var kwSearch = [
+      ['Original',      /ORIGINAL/i],
+      ['Teriyaki',      /TERIYAKI/i],
+      ['Applewood BBQ', /APPLEWOOD|BBQ\s*APPLE/i],
+      ['Salt & Pepper', /SALT\s*.?\s*PEPPER/i],
+      ['Curry',         /\bCURRY\b/i],
+      ['Zesty Thai',    /ZESTY?\s*THAI/i]
     ];
-    for (var fi = 0; fi < osjlFlavorPatterns.length; fi++) {
-      var fp = osjlFlavorPatterns[fi];
-      if (fp.re.test(ocrText) && !line_items.some(function(x) { return x.flavor === fp.flavor; })) {
-        // Verify it's a product line (near "JERKY" or "MUSHROOM" or a number) not just random text
-        var fpMatch = ocrText.match(fp.re);
-        if (fpMatch) {
-          var nearbyText = ocrText.substring(Math.max(0, fpMatch.index - 100), Math.min(ocrText.length, fpMatch.index + 100));
-          if (/JERKY|MUSHROOM|JRKY|2\.2|342|347|\d{3,}/i.test(nearbyText)) {
-            line_items.push({ flavor: fp.flavor, qty: defaultCaseQty });
-            console.log('[OSJL] Keyword "' + fp.flavor + '" found near: ' + nearbyText.substring(0, 60));
-          }
+    for (var ki = 0; ki < kwSearch.length; ki++) {
+      var kFlavor = kwSearch[ki][0];
+      var kRe = kwSearch[ki][1];
+      if (kRe.test(text) && !line_items.some(function(x) { return x.flavor === kFlavor; })) {
+        line_items.push({ flavor: kFlavor, qty: defaultQty });
+        console.log('[OSJL] Keyword → ' + kFlavor);
+      }
+    }
+
+    // Looser keyword search if still missing items
+    if (line_items.length < 4) {
+      var looseKw = [
+        ['Original',      /ORIG/i],
+        ['Teriyaki',      /TERIY/i],
+        ['Applewood BBQ', /APPLE|BBQ/i],
+        ['Salt & Pepper', /SALT|PEPPER/i],
+        ['Curry',         /CURRY/i],
+        ['Zesty Thai',    /THAI|ZEST/i]
+      ];
+      for (var li2 = 0; li2 < looseKw.length; li2++) {
+        var lFlavor = looseKw[li2][0];
+        var lRe = looseKw[li2][1];
+        if (lRe.test(text) && !line_items.some(function(x) { return x.flavor === lFlavor; })) {
+          line_items.push({ flavor: lFlavor, qty: defaultQty });
+          console.log('[OSJL] Loose keyword → ' + lFlavor);
         }
       }
     }
 
-    console.log('[OSJL] Final items:', JSON.stringify(line_items));
+    console.log('[OSJL] Final: ' + line_items.length + ' items — ' + JSON.stringify(line_items));
   } else if (isGroceryOutlet) {
     // Grocery Outlet: "400  292861  891742002014  24  2.20 OZ  PAN'S MUSHROOM JERKY ORIGINAL  $72.00"
     // Match by UPC — case qty is at start of line before GO Item# and UPC
@@ -5654,7 +5647,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.16e</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.16f</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
