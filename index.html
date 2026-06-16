@@ -137,7 +137,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.10a</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.16a</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -146,11 +146,67 @@
     <div class="card-title">Upload Purchase Order</div>
     <div class="upload-area" id="uploadArea" onclick="document.getElementById('poFile').click()">
       <p class="upload-main">Drop PO PDF here or click to browse</p>
-      <p>Supports UNFI, KeHE, Thrive Market, Foundation Foods, Market of Choice, Sierra Trading Post, HomeGoods, and Grocery Outlet orders (PDF, HTML, TXT, or XLSX)</p>
-      <p style="margin-top:6px;"><a href="#" onclick="event.preventDefault();event.stopPropagation();document.getElementById('accountsModal').style.display='flex';" style="font-size:12px;color:#2563eb;text-decoration:underline;">View all supported accounts &amp; DCs</a></p>
+      <p>Supports UNFI, KeHE, Thrive Market, Foundation Foods, Market of Choice, Sierra Trading Post, HomeGoods, Grocery Outlet, and OSJL orders (PDF, HTML, TXT, or XLSX)</p>
+      <p style="margin-top:6px;"><a href="#" onclick="event.preventDefault();event.stopPropagation();document.getElementById('accountsModal').style.display='flex';" style="font-size:12px;color:#2563eb;text-decoration:underline;">View all supported accounts &amp; DCs</a> &nbsp;|&nbsp; <a href="#" onclick="event.preventDefault();event.stopPropagation();showManualEntry();" style="font-size:12px;color:#2563eb;text-decoration:underline;">Manual entry</a></p>
       <input type="file" id="poFile" accept=".pdf,.html,.htm,.xlsx,.xls,.txt,.text" onchange="handlePOUpload(event)">
     </div>
     <div class="status" id="uploadStatus"></div>
+    <!-- Manual Entry Form (shown when PDF parsing fails) -->
+    <div id="manualEntryForm" style="display:none; margin-top:12px; padding:16px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
+      <div style="font-weight:600; margin-bottom:10px; color:#1e293b;">Manual PO Entry</div>
+      <p style="font-size:12px; color:#64748b; margin-bottom:12px;">PDF could not be read (scanned image). Enter order details below.</p>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Distributor</label>
+          <select id="me_distributor" onchange="manualEntryDistributorChanged()" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;width:100%">
+            <option value="">Select...</option>
+            <option value="osjl">Ocean State Job Lot (OSJL)</option>
+            <option value="unfi">UNFI</option>
+            <option value="kehe">KeHE</option>
+            <option value="thrive">Thrive Market</option>
+            <option value="grocery_outlet">Grocery Outlet</option>
+            <option value="foundation_foods">Foundation Foods</option>
+            <option value="sierra">Sierra / TJX</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>PO #</label>
+          <input type="text" id="me_po" placeholder="e.g. 2047424" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Ship To Name</label><input type="text" id="me_ship_name" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Ship To Address</label><input type="text" id="me_ship_addr" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;"></div>
+        <div class="form-group"><label>City, State ZIP</label><input type="text" id="me_ship_csz" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;"></div>
+      </div>
+      <div style="font-weight:600; margin:12px 0 8px; font-size:13px; color:#1e293b;">Line Items</div>
+      <div id="me_lineItems">
+        <div class="form-row me-line-item" style="align-items:flex-end;">
+          <div class="form-group" style="flex:2"><label>Flavor</label>
+            <select style="padding:8px;border:1px solid #d1d5db;border-radius:6px;width:100%" class="me_flavor">
+              <option value="">Select flavor...</option>
+              <option value="Original">Original (2.2oz)</option>
+              <option value="Zesty Thai">Zesty Thai (2.2oz)</option>
+              <option value="Applewood BBQ">Applewood BBQ (2.2oz)</option>
+              <option value="Salt & Pepper">Salt &amp; Pepper (2.2oz)</option>
+              <option value="Curry">Curry (2.2oz)</option>
+              <option value="Teriyaki">Teriyaki (2.2oz)</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1"><label>Cases</label><input type="number" min="1" class="me_qty" placeholder="Qty" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;width:100%"></div>
+          <div style="padding-bottom:2px"><button onclick="removeManualLine(this)" style="padding:6px 10px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px">✕</button></div>
+        </div>
+      </div>
+      <div style="margin-top:8px; display:flex; gap:8px;">
+        <button onclick="addManualLine()" style="padding:6px 14px;background:#e2e8f0;border:none;border-radius:6px;cursor:pointer;font-size:12px;color:#475569">+ Add Flavor</button>
+        <div style="flex:1"></div>
+        <button onclick="cancelManualEntry()" style="padding:8px 16px;background:#e2e8f0;border:none;border-radius:6px;cursor:pointer;font-size:13px;color:#475569">Cancel</button>
+        <button onclick="submitManualEntry()" style="padding:8px 20px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600">Load Order</button>
+      </div>
+    </div>
   </div>
 
   <!-- Extracted line items -->
@@ -1286,7 +1342,8 @@ async function processPO(file) {
       }
 
       if (!po_number && line_items.length === 0) {
-        statusEl.className = 'status error'; statusEl.textContent = 'Could not parse XLSX. Try manual entry.';
+        statusEl.className = 'status error'; statusEl.textContent = 'Could not parse XLSX — showing manual entry form.';
+        showManualEntry();
         return;
       }
 
@@ -1354,7 +1411,8 @@ async function processPO(file) {
     // Parse PO (all other formats)
     const parsed = parsePO(fullText);
     if (!parsed) {
-      statusEl.className = 'status error'; statusEl.textContent = 'Could not parse PO. Try manual entry.';
+      statusEl.className = 'status error'; statusEl.textContent = 'Could not parse PO — showing manual entry form.';
+      showManualEntry();
       return;
     }
 
@@ -1374,6 +1432,103 @@ async function processPO(file) {
     console.error(err);
   }
 }
+
+// ======== Manual Entry Functions ========
+var MANUAL_ENTRY_DEFAULTS = {
+  osjl: { name: 'Ocean State Job Lot', addr: '1 Job Lot Way', csz: 'N. Kingstown, RI 02852-8420' },
+  unfi: { name: 'UNFI', addr: '', csz: '' },
+  kehe: { name: 'KeHE Distributors', addr: '', csz: '' },
+  thrive: { name: 'Thrive Market', addr: '', csz: '' },
+  grocery_outlet: { name: 'Grocery Outlet', addr: '', csz: '' },
+  foundation_foods: { name: 'Foundation Foods LLC', addr: '934 Calle Negocio Ste A', csz: 'San Clemente, CA 92673-6210' },
+  sierra: { name: 'Sierra / TJX', addr: '', csz: '' }
+};
+
+function showManualEntry() {
+  document.getElementById('manualEntryForm').style.display = 'block';
+}
+
+function cancelManualEntry() {
+  document.getElementById('manualEntryForm').style.display = 'none';
+}
+
+function manualEntryDistributorChanged() {
+  var dist = document.getElementById('me_distributor').value;
+  var defaults = MANUAL_ENTRY_DEFAULTS[dist];
+  if (defaults) {
+    document.getElementById('me_ship_name').value = defaults.name;
+    document.getElementById('me_ship_addr').value = defaults.addr;
+    document.getElementById('me_ship_csz').value = defaults.csz;
+  }
+}
+
+function addManualLine() {
+  var container = document.getElementById('me_lineItems');
+  var div = document.createElement('div');
+  div.className = 'form-row me-line-item';
+  div.style.alignItems = 'flex-end';
+  div.innerHTML = '<div class="form-group" style="flex:2"><label>Flavor</label>' +
+    '<select style="padding:8px;border:1px solid #d1d5db;border-radius:6px;width:100%" class="me_flavor">' +
+    '<option value="">Select flavor...</option>' +
+    '<option value="Original">Original (2.2oz)</option>' +
+    '<option value="Zesty Thai">Zesty Thai (2.2oz)</option>' +
+    '<option value="Applewood BBQ">Applewood BBQ (2.2oz)</option>' +
+    '<option value="Salt &amp; Pepper">Salt &amp; Pepper (2.2oz)</option>' +
+    '<option value="Curry">Curry (2.2oz)</option>' +
+    '<option value="Teriyaki">Teriyaki (2.2oz)</option>' +
+    '</select></div>' +
+    '<div class="form-group" style="flex:1"><label>Cases</label>' +
+    '<input type="number" min="1" class="me_qty" placeholder="Qty" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;width:100%"></div>' +
+    '<div style="padding-bottom:2px"><button onclick="removeManualLine(this)" style="padding:6px 10px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px">✕</button></div>';
+  container.appendChild(div);
+}
+
+function removeManualLine(btn) {
+  var row = btn.closest('.me-line-item');
+  var container = document.getElementById('me_lineItems');
+  if (container.querySelectorAll('.me-line-item').length > 1) {
+    row.remove();
+  }
+}
+
+function submitManualEntry() {
+  var po_number = document.getElementById('me_po').value.trim();
+  var ship_name = document.getElementById('me_ship_name').value.trim();
+  var ship_addr = document.getElementById('me_ship_addr').value.trim();
+  var ship_csz = document.getElementById('me_ship_csz').value.trim();
+
+  if (!po_number) { alert('Please enter a PO number.'); return; }
+
+  var line_items = [];
+  var rows = document.querySelectorAll('#me_lineItems .me-line-item');
+  rows.forEach(function(row) {
+    var flavor = row.querySelector('.me_flavor').value;
+    var qty = parseInt(row.querySelector('.me_qty').value) || 0;
+    if (flavor && qty > 0) {
+      line_items.push({ flavor: flavor, qty: qty });
+    }
+  });
+
+  if (line_items.length === 0) { alert('Please add at least one flavor with a quantity.'); return; }
+
+  var parsed = {
+    po_number: po_number,
+    ship_name: ship_name,
+    ship_addr: ship_addr,
+    ship_csz: ship_csz,
+    line_items: line_items
+  };
+
+  extractedPO = parsed;
+  displayExtracted(parsed);
+
+  // Hide manual entry form and show success
+  document.getElementById('manualEntryForm').style.display = 'none';
+  var statusEl = document.getElementById('uploadStatus');
+  statusEl.className = 'status success';
+  statusEl.textContent = 'PO #' + po_number + ' loaded from manual entry — ' + line_items.length + ' line items';
+}
+// ======== End Manual Entry Functions ========
 
 function parseSierraPO(text, dcCodes) {
   // Handle multi-DC Sierra PO orders
@@ -1795,7 +1950,8 @@ function parsePO(text) {
   const isHomeGoods = !isGroceryOutlet && /HomeGoods|ROUTING\s+AND\s+DISTRIBUTION\s+INSTRUCTIONS/i.test(text);
   const isSierra = !isHomeGoods && !isGroceryOutlet && /Sierra|sierratradingpost|TJX\s+Certificate/i.test(text);
   const isFoundationFoods = !isGroceryOutlet && /Foundation\s*Foods/i.test(text);
-  const isUNFI = !isThrive && !isKeHE && !isSierra && !isHomeGoods && !isGroceryOutlet && !isFoundationFoods && /UNFI|SUPERVALU|Greenwood|PANCO/i.test(text);
+  const isOSJL = !isGroceryOutlet && !isThrive && !isKeHE && !isHomeGoods && !isSierra && !isFoundationFoods && /Ocean\s*State|Job\s*Lot|OSJL/i.test(text);
+  const isUNFI = !isThrive && !isKeHE && !isSierra && !isHomeGoods && !isGroceryOutlet && !isFoundationFoods && !isOSJL && /UNFI|SUPERVALU|Greenwood|PANCO/i.test(text);
 
   // HomeGoods: delegate to dedicated parser immediately
   if (isHomeGoods) {
@@ -1819,6 +1975,9 @@ function parsePO(text) {
     po_number = poMatch ? poMatch[1] : '';
   } else if (isKeHE) {
     const poMatch = text.match(/Order\s*#:?\s*(\d+)/i) || text.match(/PO\s*#?:?\s*(\d+)/i);
+    po_number = poMatch ? poMatch[1] : '';
+  } else if (isOSJL) {
+    const poMatch = text.match(/PO\s*#?\s*:?\s*(\d+)/i) || text.match(/Purchase\s*Order\s*#?\s*:?\s*(\d+)/i) || text.match(/\bPO(\d{6,})\b/i);
     po_number = poMatch ? poMatch[1] : '';
   } else if (isFoundationFoods) {
     const poMatch = text.match(/P\.?O\.?\s*(?:NO\.?|#|Number)\s*:?\s*(\d+)/i);
@@ -2010,6 +2169,20 @@ function parsePO(text) {
         ship_csz = keheShipBlock[2].trim();
       }
     }
+  } else if (isOSJL) {
+    // OSJL has a single known Ship To address
+    ship_name = 'Ocean State Job Lot';
+    ship_addr = '1 Job Lot Way';
+    ship_csz = 'N. Kingstown, RI 02852-8420';
+    // Try to extract from text in case of alternate DCs
+    const osjlShip = text.match(/Ship\s*To:?\s*([\s\S]{0,300}?)(?:PO|Purchase|Item|$)/i);
+    if (osjlShip) {
+      const block = osjlShip[1].trim();
+      const cszMatch = block.match(/([A-Z][\w\s.]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?)/);
+      if (cszMatch) ship_csz = cszMatch[1].trim();
+      const addrMatch = block.match(/(\d+\s+[\w\s.]+?(?:Way|Dr|Ave|St|Blvd|Rd|Pkwy|Ln|Drive|Avenue|Street|Road|Lane))\b/i);
+      if (addrMatch) ship_addr = addrMatch[1].trim();
+    }
   } else if (isGroceryOutlet) {
     // Grocery Outlet PDF text layout (pdf.js / pdfplumber):
     //   "GROCERY OUTLET WHSE #97 PO 3364838"
@@ -2196,6 +2369,63 @@ function parsePO(text) {
       for (let i = 0; i < itemOrder.length; i++) {
         if (i < qtyMatches.length) {
           line_items.push({ flavor: itemOrder[i].flavor, qty: qtyMatches[i].qty });
+        }
+      }
+    }
+  } else if (isOSJL) {
+    // OSJL POs: match by description keywords and try UPC/SKU
+    // Try UPCs first
+    for (const [upc, flavor] of Object.entries(UPC_MAP)) {
+      const upcIdx = text.indexOf(upc);
+      if (upcIdx >= 0) {
+        const nearby = text.substring(Math.max(0, upcIdx - 200), Math.min(upcIdx + 200, text.length));
+        const qtyMatch = nearby.match(/(\d+)\s*(?:case|cs|ea|each|units?|qty)/i) || nearby.match(/(?:qty|quantity|ordered)\s*:?\s*(\d+)/i);
+        if (qtyMatch) {
+          const qty = parseInt(qtyMatch[1]);
+          if (qty > 0 && !line_items.some(li => li.flavor === flavor)) {
+            line_items.push({ flavor, qty });
+          }
+        }
+      }
+    }
+    // Try SKUs
+    if (line_items.length === 0) {
+      for (const [sku, flavor] of Object.entries(SKU_MAP)) {
+        const skuIdx = text.indexOf(sku);
+        if (skuIdx >= 0) {
+          const nearby = text.substring(Math.max(0, skuIdx - 200), Math.min(skuIdx + 200, text.length));
+          const qtyMatch = nearby.match(/(\d+)\s*(?:case|cs|ea|each|units?|qty)/i) || nearby.match(/(?:qty|quantity|ordered)\s*:?\s*(\d+)/i);
+          if (qtyMatch) {
+            const qty = parseInt(qtyMatch[1]);
+            if (qty > 0 && !line_items.some(li => li.flavor === flavor)) {
+              line_items.push({ flavor, qty });
+            }
+          }
+        }
+      }
+    }
+    // Fallback: match by flavor keywords in text lines with nearby numbers
+    if (line_items.length === 0) {
+      const flavorKeywords = {
+        'Original': /\bORIG(?:INAL)?\b/i,
+        'Zesty Thai': /\bZEST(?:Y)?\s*THAI\b/i,
+        'Applewood BBQ': /\b(?:APPLEWOOD|APLWD|BBQ)\b/i,
+        'Salt & Pepper': /\b(?:SALT\s*(?:&|AND)\s*PEPPER|SLT\s*(?:&|N)?\s*PPR)\b/i,
+        'Curry': /\bCURRY\b/i,
+        'Teriyaki': /\bTERIY(?:AKI)?\b/i
+      };
+      const lines = text.split('\n');
+      for (const line of lines) {
+        for (const [flavor, pattern] of Object.entries(flavorKeywords)) {
+          if (pattern.test(line) && !line_items.some(li => li.flavor === flavor)) {
+            const qtyMatch = line.match(/(\d+)\s*(?:case|cs|ea|each|units?|qty|master)/i) || line.match(/(?:qty|quantity|ordered)\s*:?\s*(\d+)/i) || line.match(/\b(\d{2,4})\b/);
+            if (qtyMatch) {
+              const qty = parseInt(qtyMatch[1] || qtyMatch[2]);
+              if (qty > 0 && qty < 10000) {
+                line_items.push({ flavor, qty });
+              }
+            }
+          }
         }
       }
     }
@@ -3671,7 +3901,8 @@ const SHIPPING_INSTRUCTIONS = {
   homegoods: { type: 'fob_pickup', notes: 'HomeGoods arranges their own pick-up. Create internal BOL.' },
   grocery_outlet: { type: 'fob_pickup', notes: 'Grocery Outlet Inbound Traffic coordinates First Mile logistics. Pick Up at Pan\'s. BOL needed.' },
   market_of_choice: { type: 'fob_pickup', notes: 'Market of Choice pickup. Contact: Dan or Vern (541) 683-2834. Delivery to MCDC Warehouse, 1150 Owen Loop South, Eugene OR 97402.' },
-  foundation_foods: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Contact: 949.391.7660 ext 4 (Warehouse & Deliveries)\nEmail: Shipping@foundationfoods.com\nReceiving Hours: Mon-Thurs 9:30am-3:30pm\nNo deliveries on Fridays or weekends', preferredCarriers: '', doNotUse: '', notes: 'Send tracking info and shipment updates to Shipping@foundationfoods.com\nAll quantities on PO are in eaches (not cases)' }
+  foundation_foods: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Contact: 949.391.7660 ext 4 (Warehouse & Deliveries)\nEmail: Shipping@foundationfoods.com\nReceiving Hours: Mon-Thurs 9:30am-3:30pm\nNo deliveries on Fridays or weekends', preferredCarriers: '', doNotUse: '', notes: 'Send tracking info and shipment updates to Shipping@foundationfoods.com\nAll quantities on PO are in eaches (not cases)' },
+  osjl: { type: 'fob_pickup', notes: 'OSJL arranges their own pick-up (OSJ PICK-UP). Submit RTS Form to appointments@osjl.com 7 days before ship date with PO# in subject line. BOL + packing slip to appointments@osjl.com 24hrs before pickup. ONE SKU PER PALLET — no mixing. Max pallet height 96". $200 chargeback if driver arrives without BOL.' }
 };
 
 function matchShipToName(shipToName) {
@@ -3699,6 +3930,7 @@ function matchShipToName(shipToName) {
   if (name.includes('homegoods') || name.includes('home goods')) return 'homegoods';
   if (name.includes('grocery outlet')) return 'grocery_outlet';
   if (name.includes('market of choice') || name.includes('mcdc')) return 'market_of_choice';
+  if (name.includes('ocean state') || name.includes('job lot') || name.includes('osjl') || name.includes('kingstown')) return 'osjl';
   return null;
 }
 
@@ -5361,7 +5593,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.10a</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.16a</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
@@ -5442,11 +5674,12 @@ ssccUpdateDisplay();
         <div><span style="color:#16a34a;">&#9679;</span> Foundation Foods (San Clemente, CA)</div>
         <div><span style="color:#16a34a;">&#9679;</span> Market of Choice (Eugene, OR)</div>
         <div><span style="color:#16a34a;">&#9679;</span> Grocery Outlet</div>
+        <div><span style="color:#16a34a;">&#9679;</span> Ocean State Job Lot (N. Kingstown, RI)</div>
       </div>
     </div>
 
     <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;font-size:12px;color:#555;">
-      <strong>Shipping instructions available for:</strong> Greenwood, Howell, Moreno Valley, Chesterfield, Dayville, Sarasota, Aurora, Rocklin, Ridgefield, Iowa City, Richburg, Twin Cities, Lancaster, Thrive (all DCs), Foundation Foods.
+      <strong>Shipping instructions available for:</strong> Greenwood, Howell, Moreno Valley, Chesterfield, Dayville, Sarasota, Aurora, Rocklin, Ridgefield, Iowa City, Richburg, Twin Cities, Lancaster, Thrive (all DCs), Foundation Foods, OSJL.
       <br><strong>Missing instructions:</strong> Carlisle, Atlanta, Racine — add via code update.
     </div>
   </div>
