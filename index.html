@@ -139,7 +139,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.16j</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.16k</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -3995,7 +3995,7 @@ const SHIPPING_INSTRUCTIONS = {
   grocery_outlet: { type: 'fob_pickup', notes: 'Grocery Outlet Inbound Traffic coordinates First Mile logistics. Pick Up at Pan\'s. BOL needed.' },
   market_of_choice: { type: 'fob_pickup', notes: 'Market of Choice pickup. Contact: Dan or Vern (541) 683-2834. Delivery to MCDC Warehouse, 1150 Owen Loop South, Eugene OR 97402.' },
   foundation_foods: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Contact: 949.391.7660 ext 4 (Warehouse & Deliveries)\nEmail: Shipping@foundationfoods.com\nReceiving Hours: Mon-Thurs 9:30am-3:30pm\nNo deliveries on Fridays or weekends', preferredCarriers: '', doNotUse: '', notes: 'Send tracking info and shipment updates to Shipping@foundationfoods.com\nAll quantities on PO are in eaches (not cases)' },
-  osjl: { type: 'prepaid', notes: 'Panco arranges LTL freight (Estes or TForce). ONE SKU PER PALLET — no mixing. Max pallet height 96". BOL destination name: "Ocean State Jobbers". Send BOL + packing slip to appointments@osjl.com 24hrs before pickup. $200 chargeback if driver arrives without BOL.' }
+  osjl: { type: 'prepaid', deliveryInstructions: 'Appointment Required.\nEmail: appointments@osjl.com', preferredCarriers: 'Estes\nTForce', doNotUse: '', notes: 'ONE SKU PER PALLET — no mixing. Max pallet height 96". BOL destination name: "Ocean State Jobbers". Send BOL + packing slip to appointments@osjl.com 24hrs before pickup. $200 chargeback if driver arrives without BOL.' }
 };
 
 function matchShipToName(shipToName) {
@@ -4119,12 +4119,55 @@ function buildShippingInstructions(prefix) {
     html += '</div>';
   } else if (info.type === 'prepaid') {
     html += '<div style="margin-top:12px; padding:14px; background:#ecfdf5; border:1px solid #6ee7b7; border-radius:8px;">';
-    html += '<div style="font-weight:700; font-size:14px; margin-bottom:8px;">Prepaid LTL — Panco Arranges Freight</div>';
-    html += '<div style="font-size:12px; margin-bottom:10px;">Panco books and pays for LTL shipping.</div>';
-    if (info.notes) {
-      html += '<div style="padding:6px 8px; background:#fff; border:1px solid #e5e7eb; border-radius:4px; font-size:12px; margin-bottom:10px;">' + info.notes + '</div>';
+    html += '<div style="font-weight:700; font-size:14px; margin-bottom:10px;">Prepaid LTL — Panco Arranges Freight (Unishippers)</div>';
+
+    // Pickup Instructions
+    html += '<div style="margin-bottom:10px;"><label style="font-weight:600; font-size:12px; display:block; margin-bottom:3px;">Pickup Instructions</label>';
+    html += '<div style="display:flex; gap:6px;">';
+    html += '<textarea id="' + uid + 'pickup" readonly style="flex:1; padding:6px; border:1px solid #d1d5db; border-radius:4px; font-family:monospace; font-size:12px; resize:vertical; min-height:36px;">PO: ' + poNumber + '. PANCO HRS: M-Th 8:30am-3pm, F 8:30am-2pm.</textarea>';
+    html += '<button id="' + uid + 'pickup_btn" onclick="copyField(\'' + uid + 'pickup\')" style="padding:6px 12px; background:#2563eb; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px; white-space:nowrap; align-self:flex-start;">Copy</button>';
+    html += '</div></div>';
+
+    // Delivery Instructions
+    if (info.deliveryInstructions) {
+      html += '<div style="margin-bottom:10px;"><label style="font-weight:600; font-size:12px; display:block; margin-bottom:3px;">Delivery Instructions</label>';
+      html += '<div style="display:flex; gap:6px;">';
+      html += '<textarea id="' + uid + 'delivery" readonly style="flex:1; padding:6px; border:1px solid #d1d5db; border-radius:4px; font-family:monospace; font-size:12px; resize:vertical; min-height:50px;">' + info.deliveryInstructions.replace(/\\n/g, '\n') + '</textarea>';
+      html += '<button id="' + uid + 'delivery_btn" onclick="copyField(\'' + uid + 'delivery\')" style="padding:6px 12px; background:#2563eb; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px; white-space:nowrap; align-self:flex-start;">Copy</button>';
+      html += '</div></div>';
     }
-    html += '<button onclick="generateBOL(\'' + prefix + '\')" style="padding:8px 16px; background:#1e40af; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Generate Internal BOL (PDF)</button>';
+
+    // Handling Instructions
+    html += '<div style="margin-bottom:10px;"><label style="font-weight:600; font-size:12px; display:block; margin-bottom:3px;">Handling Instructions</label>';
+    html += '<div style="display:flex; gap:6px;">';
+    html += '<textarea id="' + uid + 'handling" readonly style="flex:1; padding:6px; border:1px solid #d1d5db; border-radius:4px; font-family:monospace; font-size:12px; resize:vertical; min-height:36px;">DO NOT STACK</textarea>';
+    html += '<button id="' + uid + 'handling_btn" onclick="copyField(\'' + uid + 'handling\')" style="padding:6px 12px; background:#2563eb; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px; white-space:nowrap; align-self:flex-start;">Copy</button>';
+    html += '</div></div>';
+
+    // Preferred Carriers
+    if (info.preferredCarriers) {
+      html += '<div style="margin-bottom:10px;"><label style="font-weight:600; font-size:12px; display:block; margin-bottom:3px; color:#16a34a;">Preferred Carriers</label>';
+      html += '<div style="display:flex; gap:6px;">';
+      html += '<textarea id="' + uid + 'carriers" readonly style="flex:1; padding:6px; border:1px solid #d1d5db; border-radius:4px; font-family:monospace; font-size:12px; resize:vertical; min-height:36px;">' + info.preferredCarriers.replace(/\\n/g, '\n') + '</textarea>';
+      html += '<button id="' + uid + 'carriers_btn" onclick="copyField(\'' + uid + 'carriers\')" style="padding:6px 12px; background:#2563eb; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px; white-space:nowrap; align-self:flex-start;">Copy</button>';
+      html += '</div></div>';
+    }
+
+    // Do Not Use
+    if (info.doNotUse) {
+      html += '<div style="margin-bottom:10px;"><label style="font-weight:600; font-size:12px; display:block; margin-bottom:3px; color:#dc2626;">Do Not Use</label>';
+      html += '<div style="display:flex; gap:6px;">';
+      html += '<textarea id="' + uid + 'donotuse" readonly style="flex:1; padding:6px; border:1px solid #fecaca; border-radius:4px; font-family:monospace; font-size:12px; resize:vertical; min-height:36px; background:#fef2f2;">' + info.doNotUse.replace(/\\n/g, '\n') + '</textarea>';
+      html += '<button id="' + uid + 'donotuse_btn" onclick="copyField(\'' + uid + 'donotuse\')" style="padding:6px 12px; background:#2563eb; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:11px; white-space:nowrap; align-self:flex-start;">Copy</button>';
+      html += '</div></div>';
+    }
+
+    // Notes
+    if (info.notes) {
+      html += '<div style="margin-top:6px; padding:6px 8px; background:#fff; border:1px solid #e5e7eb; border-radius:4px; font-size:11px; color:#555;">' + info.notes + '</div>';
+    }
+
+    html += '<button onclick="generateBOL(\'' + prefix + '\')" style="margin-top:10px; padding:8px 16px; background:#1e40af; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Generate Internal BOL (PDF)</button>';
     html += '</div>';
   } else if (info.type === 'fob_pickup') {
     html += '<div style="margin-top:12px; padding:14px; background:#f3f4f6; border:1px solid #d1d5db; border-radius:8px;">';
@@ -5931,7 +5974,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.16j</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.16k</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
