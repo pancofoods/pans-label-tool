@@ -11,6 +11,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
+<script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; min-height: 100vh; }
@@ -138,7 +139,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.16f</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.16j</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -244,6 +245,19 @@
       <div id="palletAssignment" style="display:none; margin-top:12px;"></div>
       <div id="shipmentSummary" style="display:none; margin-top:12px;"></div>
       <div id="shippingInstructions" style="display:none;"></div>
+      <div id="osjlRtsSection" style="display:none; margin-top:12px; padding:16px; background:#fff7ed; border:1px solid #fed7aa; border-radius:8px;">
+        <div style="font-weight:700; font-size:15px; margin-bottom:12px; color:#9a3412;">OSJL Ready-to-Ship (RTS) Form</div>
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+          <div style="flex:1; min-width:150px;"><label style="font-size:12px; font-weight:600; display:block; margin-bottom:3px;">Today's Date</label><input type="date" id="rtsToday" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px;"></div>
+          <div style="flex:1; min-width:150px;"><label style="font-size:12px; font-weight:600; display:block; margin-bottom:3px;">Ready to Ship Date</label><input type="date" id="rtsShipDate" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px;"></div>
+          <div style="flex:1; min-width:150px;"><label style="font-size:12px; font-weight:600; display:block; margin-bottom:3px;">Contact Name</label><input type="text" id="rtsContact" value="LYSSA" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px;"></div>
+        </div>
+        <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+          <div id="rtsTemplateUpload" style="flex:1; min-width:200px; display:none;"><label style="font-size:12px; font-weight:600; display:block; margin-bottom:3px;">Blank RTS Template (PDF) <span style="font-weight:400; color:#888;">— only needed if auto-load fails</span></label><input type="file" id="rtsTemplate" accept=".pdf" style="width:100%; padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px;"></div>
+          <button onclick="generateOSJLRTS()" style="padding:10px 24px; background:#ea580c; color:white; border:none; border-radius:6px; font-weight:600; font-size:14px; cursor:pointer; white-space:nowrap;">Generate RTS Form</button>
+        </div>
+        <div id="rtsStatus" style="margin-top:8px; font-size:12px;"></div>
+      </div>
       <div id="lotCodeSummary" style="display:none;"></div>
     </div>
     <div id="multiDCContent" style="display:none"></div>
@@ -2563,8 +2577,33 @@ function displayExtracted(po) {
     tbody.appendChild(tr);
   });
 
+  // OSJL: one SKU per pallet — auto-set pallet count to number of line items
+  var distKey = matchShipToName(po.ship_name || '');
+  if (distKey === 'osjl' && po.line_items.length > 1) {
+    document.getElementById('totalPallets').value = po.line_items.length;
+  }
+
+  // Show/hide OSJL RTS section
+  var rtsSection = document.getElementById('osjlRtsSection');
+  if (rtsSection) {
+    if (distKey === 'osjl') {
+      rtsSection.style.display = 'block';
+      // Pre-set today's date
+      var today = new Date().toISOString().split('T')[0];
+      document.getElementById('rtsToday').value = today;
+    } else {
+      rtsSection.style.display = 'none';
+    }
+  }
+
   document.getElementById('lineItemsCard').style.display = 'block';
   document.getElementById('lineItemsCard').scrollIntoView({ behavior: 'smooth' });
+
+  // For OSJL, build pallet assignment grid BEFORE summary so stats read correct pallet count
+  if (distKey === 'osjl' && po.line_items.length > 1) {
+    buildPalletAssignment('');
+  }
+
   buildShipmentSummary('');
   buildShippingInstructions('');
   buildLotCodeSummary('');
@@ -3956,7 +3995,7 @@ const SHIPPING_INSTRUCTIONS = {
   grocery_outlet: { type: 'fob_pickup', notes: 'Grocery Outlet Inbound Traffic coordinates First Mile logistics. Pick Up at Pan\'s. BOL needed.' },
   market_of_choice: { type: 'fob_pickup', notes: 'Market of Choice pickup. Contact: Dan or Vern (541) 683-2834. Delivery to MCDC Warehouse, 1150 Owen Loop South, Eugene OR 97402.' },
   foundation_foods: { type: 'unishippers', transitTime: '', deliveryInstructions: 'Contact: 949.391.7660 ext 4 (Warehouse & Deliveries)\nEmail: Shipping@foundationfoods.com\nReceiving Hours: Mon-Thurs 9:30am-3:30pm\nNo deliveries on Fridays or weekends', preferredCarriers: '', doNotUse: '', notes: 'Send tracking info and shipment updates to Shipping@foundationfoods.com\nAll quantities on PO are in eaches (not cases)' },
-  osjl: { type: 'fob_pickup', notes: 'OSJL arranges their own pick-up (OSJ PICK-UP). Submit RTS Form to appointments@osjl.com 7 days before ship date with PO# in subject line. BOL + packing slip to appointments@osjl.com 24hrs before pickup. ONE SKU PER PALLET — no mixing. Max pallet height 96". $200 chargeback if driver arrives without BOL.' }
+  osjl: { type: 'prepaid', notes: 'Panco arranges LTL freight (Estes or TForce). ONE SKU PER PALLET — no mixing. Max pallet height 96". BOL destination name: "Ocean State Jobbers". Send BOL + packing slip to appointments@osjl.com 24hrs before pickup. $200 chargeback if driver arrives without BOL.' }
 };
 
 function matchShipToName(shipToName) {
@@ -4078,6 +4117,15 @@ function buildShippingInstructions(prefix) {
     }
 
     html += '</div>';
+  } else if (info.type === 'prepaid') {
+    html += '<div style="margin-top:12px; padding:14px; background:#ecfdf5; border:1px solid #6ee7b7; border-radius:8px;">';
+    html += '<div style="font-weight:700; font-size:14px; margin-bottom:8px;">Prepaid LTL — Panco Arranges Freight</div>';
+    html += '<div style="font-size:12px; margin-bottom:10px;">Panco books and pays for LTL shipping.</div>';
+    if (info.notes) {
+      html += '<div style="padding:6px 8px; background:#fff; border:1px solid #e5e7eb; border-radius:4px; font-size:12px; margin-bottom:10px;">' + info.notes + '</div>';
+    }
+    html += '<button onclick="generateBOL(\'' + prefix + '\')" style="padding:8px 16px; background:#1e40af; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Generate Internal BOL (PDF)</button>';
+    html += '</div>';
   } else if (info.type === 'fob_pickup') {
     html += '<div style="margin-top:12px; padding:14px; background:#f3f4f6; border:1px solid #d1d5db; border-radius:8px;">';
     html += '<div style="font-weight:700; font-size:14px; margin-bottom:8px;">FOB / Pickup at Pan\'s</div>';
@@ -4162,8 +4210,12 @@ function getShipmentStats(prefix) {
   const totalWeight = pallets.reduce((s, p) => s + p.totalWeight, 0);
   const unitCount = totalCases * BOL_CONSTANTS.unitsPerCase;
 
+  // Distributor-aware freight class (OSJL = 70, default = 125)
+  const distKey = matchShipToName(po.ship_name || '');
+  const freightClass = (distKey === 'osjl') ? 70 : BOL_CONSTANTS.freightClass;
+
   return {
-    pallets, numPallets, totalCases, totalWeight, unitCount, noDisplay, box,
+    pallets, numPallets, totalCases, totalWeight, unitCount, noDisplay, box, freightClass,
     poNumber: po.po_number,
     shipTo: {
       name: prefix.startsWith('_dc') ? po.shipments[parseInt(prefix.replace('_dc', ''))].dc_name : (document.getElementById('ex_ship_name')?.value || po.ship_name),
@@ -4228,7 +4280,7 @@ function buildShipmentSummary(prefix) {
   html += '<div style="margin-top:8px; font-size:12px; color:#555;">';
   html += 'Box size: ' + boxLabel + ' | ' + BOL_CONSTANTS.weightPerCase + ' lb/case + ' + BOL_CONSTANTS.palletWeight + ' lb pallet | ';
   html += stats.numPallets + ' pallet' + (stats.numPallets > 1 ? 's' : '') + ' | Unit count: ' + stats.unitCount;
-  html += ' | Freight class: ' + BOL_CONSTANTS.freightClass;
+  html += ' | Freight class: ' + stats.freightClass;
   html += '</div></div>';
 
   div.innerHTML = html;
@@ -4529,7 +4581,7 @@ function generateBOL(prefix) {
   doc.setFontSize(9);
   doc.text('Pan\'s Mushroom Jerky - Unit Count : ' + stats.unitCount, descStartX + 3, y + 11);
   cell(descStartX + descW, y, nmfcW, descRowH, '');
-  cell(descStartX + descW + nmfcW, y, classW, descRowH, '125', { bold: true, fs: 10, center: true });
+  cell(descStartX + descW + nmfcW, y, classW, descRowH, String(stats.freightClass), { bold: true, fs: 10, center: true });
   y += descRowH;
 
   // Per-pallet rows
@@ -4829,9 +4881,31 @@ function buildPalletAssignment(prefix) {
   // Flatten items into lot-level rows
   const rows = flattenItemsToLotRows(items);
 
+  // Check if OSJL (one SKU per pallet — no mixing)
+  const isOSJLOrder = matchShipToName(po.ship_name || '') === 'osjl';
+
   // Auto-split at the lot-row level
-  const split = autoSplitPallets(rows, numPallets, noDisplay);
+  let split;
   const capacity = noDisplay ? 304 : 130;
+  if (isOSJLOrder && numPallets >= items.length) {
+    // OSJL: each flavor gets its own pallet, no mixing
+    split = [];
+    for (let p = 0; p < numPallets; p++) split.push(rows.map(() => 0));
+    // Map each row's flavor to its pallet index (flavor order = pallet order)
+    const flavorToPallet = {};
+    let palletIdx = 0;
+    for (let i = 0; i < items.length && palletIdx < numPallets; i++) {
+      flavorToPallet[items[i].flavor] = palletIdx++;
+    }
+    for (let i = 0; i < rows.length; i++) {
+      const p = flavorToPallet[rows[i].flavor];
+      if (p !== undefined && p < numPallets) {
+        split[p][i] = rows[i].qty;
+      }
+    }
+  } else {
+    split = autoSplitPallets(rows, numPallets, noDisplay);
+  }
 
   // Store rows on the div for getPalletItems to use
   div._palletRows = rows;
@@ -5022,6 +5096,216 @@ function getPalletItems(prefix, palletIdx, items) {
   }
 
   return { items: palletItems, totalCases: totalCases };
+}
+
+// ==================== OSJL RTS FORM GENERATOR ====================
+
+// OSJL SKU mapping: flavor → OSJL SKU number
+var OSJL_SKUS = {
+  'Original': '342346',
+  'Teriyaki': '342349',
+  'Applewood BBQ': '347162',
+  'Salt & Pepper': '347163',
+  'Curry': '356618',
+  'Zesty Thai': '356619'
+};
+
+// OSJL RTS form field ID mapping (from blank template)
+// Page 1 field IDs (some internal names don't match visual labels)
+var RTS_FIELDS = {
+  todayDate: 'DATE',
+  terms: 'TERMS',
+  poNumber: 'PO#',
+  loadType: 'LOAD TYPE',
+  doubleStack: '# OF PALLET SPACES',  // form field ID for "Double Stack" position
+  cases: 'CASES-0',
+  weight: 'WEIGHT',
+  cube: 'CUBE',
+  totalPallets: 'TOTAL # OF PALLETS',
+  palletDimension: 'PALLET DIMENSION',
+  hazmat: 'VENDOR #',         // form field ID for "Hazmat" position
+  reefer: 'YOUR NAME',        // form field ID for "Reefer" position
+  specialEqpp: 'YOUR PH#',    // form field ID for "Special EQPP" position
+  addlInfo: 'YOUR EMAIL',     // form field ID for "Add'l Info" position
+  rtsDate: 'RTS DATE',
+  shipperName: 'SHIPPER NAME',
+  contact: 'CONTACT',
+  phone: 'PHONE #',
+  email: 'E-MAIL',
+  address: 'ADDRESS',
+  city: 'CITY',
+  state: 'STATE',
+  zip: 'ZIP',
+  pickupNumber: 'HOURS FOR PICKUP'
+};
+
+// Shipper constants (from verified previous RTS)
+var PANCO_SHIPPER = {
+  name: 'PANCO FOODS',
+  contact: 'LYSSA',
+  phone: '503.935.9206',
+  email: 'ORDERS@MUSHROOMJERKY.COM',
+  address: '302 SE 7TH AVE',
+  city: 'PORTLAND',
+  state: 'OR',
+  zip: '97214',
+  pickupNumber: '1'
+};
+
+async function generateOSJLRTS() {
+  var statusEl = document.getElementById('rtsStatus');
+  statusEl.textContent = '';
+  statusEl.style.color = '';
+
+  // Validate dates
+  var todayVal = document.getElementById('rtsToday').value;
+  var shipDateVal = document.getElementById('rtsShipDate').value;
+  if (!todayVal) { statusEl.textContent = 'Please enter Today\'s Date'; statusEl.style.color = '#dc2626'; return; }
+  if (!shipDateVal) { statusEl.textContent = 'Please enter Ready to Ship Date'; statusEl.style.color = '#dc2626'; return; }
+
+  // Format dates from YYYY-MM-DD to M/DD/YY
+  function fmtDate(iso) {
+    var parts = iso.split('-');
+    return parseInt(parts[1]) + '/' + parseInt(parts[2]) + '/' + parts[0].slice(2);
+  }
+  var todayStr = fmtDate(todayVal);
+  var shipDateStr = fmtDate(shipDateVal);
+
+  // Get PO data
+  var po = extractedPO;
+  if (!po) { statusEl.textContent = 'No PO loaded'; statusEl.style.color = '#dc2626'; return; }
+
+  // Get template PDF — try hosted URL first, fall back to file upload
+  var templateBytes = null;
+  var RTS_TEMPLATE_URL = 'https://pancofoods.github.io/pans-label-tool/templates/osjl_rts_blank.pdf';
+
+  statusEl.textContent = 'Loading RTS template...';
+  statusEl.style.color = '#2563eb';
+
+  try {
+    var resp = await fetch(RTS_TEMPLATE_URL);
+    if (resp.ok) {
+      templateBytes = await resp.arrayBuffer();
+      console.log('[RTS] Template loaded from hosted URL');
+    }
+  } catch (e) {
+    console.log('[RTS] Hosted template not available, checking file upload');
+  }
+
+  if (!templateBytes) {
+    // Show upload field and check for uploaded file
+    document.getElementById('rtsTemplateUpload').style.display = 'block';
+    var templateInput = document.getElementById('rtsTemplate');
+    if (!templateInput.files || !templateInput.files[0]) {
+      statusEl.textContent = 'Template not hosted yet — please upload the blank OSJL RTS PDF above';
+      statusEl.style.color = '#dc2626';
+      return;
+    }
+    templateBytes = await templateInput.files[0].arrayBuffer();
+    console.log('[RTS] Template loaded from file upload');
+  }
+
+  statusEl.textContent = 'Generating RTS form...';
+  statusEl.style.color = '#2563eb';
+
+  try {
+
+    // Load with pdf-lib
+    var pdfDoc = await PDFLib.PDFDocument.load(templateBytes);
+    var form = pdfDoc.getForm();
+
+    // Calculate values
+    var totalCases = 0;
+    po.line_items.forEach(function(item) { totalCases += parseInt(item.qty) || 0; });
+    var numPallets = parseInt(document.getElementById('totalPallets').value) || po.line_items.length;
+    var weightPerCase = 6; // from previous RTS: 3600 / 600 = 6 lbs/case
+    var cubePerPallet = 80; // from previous RTS: 480 / 6 = 80 cu ft/pallet
+    var totalWeight = totalCases * weightPerCase;
+    var totalCube = numPallets * cubePerPallet;
+    var contactName = document.getElementById('rtsContact').value || PANCO_SHIPPER.contact;
+
+    // Helper to set field safely
+    function setField(fieldId, value) {
+      try {
+        var field = form.getTextField(fieldId);
+        field.setText(String(value));
+      } catch (e) {
+        console.warn('[RTS] Field not found: ' + fieldId, e.message);
+      }
+    }
+
+    // Page 1: Header fields
+    setField(RTS_FIELDS.todayDate, todayStr);
+    setField(RTS_FIELDS.terms, 'PREPAID');
+    setField(RTS_FIELDS.poNumber, po.po_number);
+    setField(RTS_FIELDS.loadType, 'PALLET');
+    setField(RTS_FIELDS.doubleStack, 'NO');
+    setField(RTS_FIELDS.cases, String(totalCases));
+    setField(RTS_FIELDS.weight, String(totalWeight));
+    setField(RTS_FIELDS.cube, String(totalCube));
+    setField(RTS_FIELDS.totalPallets, String(numPallets));
+    setField(RTS_FIELDS.palletDimension, '48X40X72');
+    setField(RTS_FIELDS.hazmat, 'NO');
+    setField(RTS_FIELDS.reefer, 'NO');
+    setField(RTS_FIELDS.specialEqpp, '');
+    setField(RTS_FIELDS.addlInfo, '');
+    setField(RTS_FIELDS.rtsDate, shipDateStr);
+    setField(RTS_FIELDS.shipperName, PANCO_SHIPPER.name);
+    setField(RTS_FIELDS.contact, contactName);
+    setField(RTS_FIELDS.phone, PANCO_SHIPPER.phone);
+    setField(RTS_FIELDS.email, PANCO_SHIPPER.email);
+    setField(RTS_FIELDS.address, PANCO_SHIPPER.address);
+    setField(RTS_FIELDS.city, PANCO_SHIPPER.city);
+    setField(RTS_FIELDS.state, PANCO_SHIPPER.state);
+    setField(RTS_FIELDS.zip, PANCO_SHIPPER.zip);
+    setField(RTS_FIELDS.pickupNumber, PANCO_SHIPPER.pickupNumber);
+
+    // Page 2+: Product line items
+    // Field suffixes: -0 through -17 (note: CASE PACK index 2 has no suffix dash inconsistency)
+    var casePackPerUnit = 24;
+    for (var i = 0; i < po.line_items.length && i < 18; i++) {
+      var item = po.line_items[i];
+      var qty = parseInt(item.qty) || 0;
+      var sku = OSJL_SKUS[item.flavor] || '';
+      var totalPieces = qty * casePackPerUnit;
+      var suffix = ' -' + i;
+
+      setField('OSJL SKU' + suffix, sku);
+      setField('TOTAL PIECES' + suffix, String(totalPieces));
+      // Handle CASE PACK field name inconsistency (index 2 has no space before dash)
+      if (i === 2) {
+        setField('CASE PACK', String(casePackPerUnit));
+      } else {
+        setField('CASE PACK' + suffix, String(casePackPerUnit));
+      }
+      setField('CASES' + suffix, String(qty));
+      // Class field has inconsistent spacing: -0, " - 1", -2, " - 3", -4, -5, etc
+      var classFieldId;
+      if (i === 1 || i === 3) {
+        classFieldId = 'IF LTL, PLEASE PROVIDE CLASS - ' + i;
+      } else {
+        classFieldId = 'IF LTL, PLEASE PROVIDE CLASS -' + i;
+      }
+      setField(classFieldId, '70');
+    }
+
+    // Save filled PDF
+    var filledBytes = await pdfDoc.save();
+    var blob = new Blob([filledBytes], { type: 'application/pdf' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'OSJL_RTS_' + po.po_number + '_PANCO_FOODS.pdf';
+    a.click();
+    URL.revokeObjectURL(url);
+
+    statusEl.textContent = 'RTS form saved: OSJL_RTS_' + po.po_number + '_PANCO_FOODS.pdf';
+    statusEl.style.color = '#16a34a';
+  } catch (err) {
+    console.error('[RTS] Error:', err);
+    statusEl.textContent = 'Error: ' + err.message;
+    statusEl.style.color = '#dc2626';
+  }
 }
 
 // Generate pallet tags for single-DC order
@@ -5647,7 +5931,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.16f</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.16j</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
