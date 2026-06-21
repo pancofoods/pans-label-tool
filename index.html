@@ -139,7 +139,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.17a</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.20a</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -981,11 +981,34 @@ function expandLots(prefix, idx, totalQty, isDC) {
   const mainRow = lotsInput.closest('tr');
   if (!mainRow) return;
 
-  // Remove any existing sub-lot rows
+  // Save existing sub-lot values before removing rows
+  const savedLots = {};
+  let existingSubLotCount = 0;
   let nextRow = mainRow.nextElementSibling;
   while (nextRow && nextRow.classList.contains('sublot-row')) {
+    const lotIdSuffix = prefix + idx + '_' + existingSubLotCount;
+    savedLots[existingSubLotCount] = {
+      bb: document.getElementById('bb_' + lotIdSuffix)?.value || '',
+      lot: document.getElementById('lot_' + lotIdSuffix)?.value || '',
+      qty: document.getElementById('lotqty_' + lotIdSuffix)?.value || '',
+      start: document.getElementById('start_' + lotIdSuffix)?.value || '',
+      end: document.getElementById('end_' + lotIdSuffix)?.value || ''
+    };
+    existingSubLotCount++;
     nextRow.remove();
     nextRow = mainRow.nextElementSibling;
+  }
+  // Also save main row values (for when going from 1 lot to multi)
+  const mainBB = mainRow.querySelector('[id^="bb_' + prefix + idx + '"]');
+  const mainLot = mainRow.querySelector('[id^="lot_' + prefix + idx + '"]');
+  if (existingSubLotCount === 0 && mainBB && mainLot) {
+    savedLots[0] = {
+      bb: mainBB.value || '',
+      lot: mainLot.value || '',
+      qty: '' + totalQty,
+      start: '',
+      end: ''
+    };
   }
 
   // Get the main row's BB, LOT, Start, End, Download cells (indices 3,4,5,6,7)
@@ -1006,12 +1029,17 @@ function expandLots(prefix, idx, totalQty, isDC) {
       subRow.className = 'sublot-row';
 
       const lotNum = l + 1;
-      const defaultQty = l === lotsCount - 1 ? totalQty - (casesPerLot * l) : casesPerLot;
+      // Use saved qty if we have it, otherwise calculate default
+      const defaultQty = savedLots[l]?.qty ? parseInt(savedLots[l].qty) : (l === lotsCount - 1 ? totalQty - (casesPerLot * l) : casesPerLot);
       const lotIdSuffix = prefix + idx + '_' + l;
 
-      // Calculate start/end box for this lot
-      const lotStart = l === 0 ? 1 : (casesPerLot * l) + 1;
-      const lotEnd = l === lotsCount - 1 ? totalQty : casesPerLot * (l + 1);
+      // Use saved start/end if we have them, otherwise calculate
+      const lotStart = savedLots[l]?.start ? parseInt(savedLots[l].start) : (l === 0 ? 1 : (casesPerLot * l) + 1);
+      const lotEnd = savedLots[l]?.end ? parseInt(savedLots[l].end) : (l === lotsCount - 1 ? totalQty : casesPerLot * (l + 1));
+
+      // Restore saved lot code and BB date
+      const savedBB = savedLots[l]?.bb || '';
+      const savedLotCode = savedLots[l]?.lot || '';
 
       // Build download button onclick
       let downloadOnclick;
@@ -1027,8 +1055,8 @@ function expandLots(prefix, idx, totalQty, isDC) {
         '<td class="lot-label">' + lotNum + '</td>' +
         '<td class="qty-col"><input type="number" id="lotqty_' + lotIdSuffix + '" value="' + defaultQty + '" min="0" style="width:70px;text-align:center" oninput="adjustLotQty(\'' + prefix + '\',' + idx + ',' + l + ',' + totalQty + ',' + lotsCount + ')"></td>' +
         '<td class="qty-col"></td>' +
-        '<td><input type="text" id="bb_' + lotIdSuffix + '" placeholder="MM/DD/YY" oninput="updateLotSummary(\'' + prefix + '\',' + idx + ',' + totalQty + ')"></td>' +
-        '<td><input type="text" id="lot_' + lotIdSuffix + '" placeholder="Lot code" oninput="updateLotSummary(\'' + prefix + '\',' + idx + ',' + totalQty + ')"></td>' +
+        '<td><input type="text" id="bb_' + lotIdSuffix + '" value="' + savedBB + '" placeholder="MM/DD/YY" oninput="updateLotSummary(\'' + prefix + '\',' + idx + ',' + totalQty + ')"></td>' +
+        '<td><input type="text" id="lot_' + lotIdSuffix + '" value="' + savedLotCode + '" placeholder="Lot code" oninput="updateLotSummary(\'' + prefix + '\',' + idx + ',' + totalQty + ')"></td>' +
         '<td class="qty-col"><input type="number" id="start_' + lotIdSuffix + '" value="' + lotStart + '" min="1" style="width:70px;text-align:center"></td>' +
         '<td class="qty-col"><input type="number" id="end_' + lotIdSuffix + '" value="' + lotEnd + '" min="1" style="width:70px;text-align:center"></td>' +
         '<td><button class="btn" onclick="' + downloadOnclick + '" style="padding:6px 12px;font-size:12px;background:#059669;color:white;border-radius:6px;white-space:nowrap">Download</button></td>';
@@ -1044,6 +1072,11 @@ function expandLots(prefix, idx, totalQty, isDC) {
     for (let c = 3; c <= 7; c++) {
       if (mainCells[c]) mainCells[c].style.display = '';
     }
+    // Restore lot code from first sub-lot back to main row
+    if (savedLots[0] && mainBB && mainLot) {
+      if (savedLots[0].bb) mainBB.value = savedLots[0].bb;
+      if (savedLots[0].lot) mainLot.value = savedLots[0].lot;
+    }
     setTimeout(attachLotPickers, 100);
   }
 
@@ -1053,11 +1086,11 @@ function expandLots(prefix, idx, totalQty, isDC) {
     var dcNum = prefix.replace('_', '');
     palletPrefix = '_dc' + dcNum;
   }
-  // Save current pallet state, rebuild, then restore non-affected rows
+  // Save current pallet state, rebuild WITHOUT auto-split, then restore saved values
   var savedPallet = savePalletState(palletPrefix);
   setTimeout(function() {
-    buildPalletAssignment(palletPrefix);
-    if (savedPallet) restorePalletState(palletPrefix, savedPallet, idx);
+    buildPalletAssignment(palletPrefix, true);
+    if (savedPallet) restorePalletState(palletPrefix, savedPallet);
   }, 150);
 }
 
@@ -4880,7 +4913,7 @@ function restorePalletState(prefix, savedState, changedItemIdx) {
   updatePalletTotals(prefix, currentPallets, newRows.length, capacity);
 }
 
-function buildPalletAssignment(prefix) {
+function buildPalletAssignment(prefix, skipAutoSplit) {
   prefix = prefix || '';
   const div = document.getElementById('palletAssignment' + prefix);
   if (!div) return;
@@ -4932,10 +4965,14 @@ function buildPalletAssignment(prefix) {
   // Check if OSJL (one SKU per pallet — no mixing)
   const isOSJLOrder = matchShipToName(po.ship_name || '') === 'osjl';
 
-  // Auto-split at the lot-row level
+  // Auto-split at the lot-row level (skip when rebuilding from expandLots — preserves manual entries)
   let split;
   const capacity = noDisplay ? 304 : 130;
-  if (isOSJLOrder && numPallets >= items.length) {
+  if (skipAutoSplit) {
+    // All zeros — restorePalletState will fill in saved values
+    split = [];
+    for (let p = 0; p < numPallets; p++) split.push(rows.map(() => 0));
+  } else if (isOSJLOrder && numPallets >= items.length) {
     // OSJL: each flavor gets its own pallet, no mixing
     split = [];
     for (let p = 0; p < numPallets; p++) split.push(rows.map(() => 0));
@@ -5979,7 +6016,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.17a</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.20a</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
