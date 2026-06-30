@@ -246,7 +246,7 @@
       <button class="btn btn-primary" onclick="generateAllLabels()" style="margin-top:16px">Generate All Labels</button>
       <div style="margin-top:16px; display:flex; gap:12px; align-items:center;">
         <label style="margin:0;">Total Pallets:</label>
-        <input type="number" id="totalPallets" min="1" value="1" style="width:60px; padding:6px; border:1px solid #ccc; border-radius:4px;" onchange="buildPalletAssignment()">
+        <input type="number" id="totalPallets" min="1" value="1" style="width:60px; padding:6px; border:1px solid #ccc; border-radius:4px;">
         <button class="btn" onclick="buildPalletAssignment('')" style="padding:8px 16px;background:#6b7280;color:white;border-radius:6px;">Recalculate Pallets</button>
         <button class="btn btn-primary" onclick="generatePalletTags()" style="padding:8px 16px;">Generate Pallet Tags</button>
       </div>
@@ -1140,14 +1140,7 @@ function adjustLotQty(prefix, idx, changedLot, totalQty, lotsCount) {
   }
   updateLotSummary(prefix, idx, totalQty);
 
-  // Rebuild pallet assignment with updated lot quantities (debounced)
-  var palletPrefix = '';
-  if (prefix && prefix.endsWith('_')) {
-    var dcNum = prefix.replace('_', '');
-    palletPrefix = '_dc' + dcNum;
-  }
-  if (_palletRefreshTimer) clearTimeout(_palletRefreshTimer);
-  _palletRefreshTimer = setTimeout(function() { buildPalletAssignment(palletPrefix); }, 300);
+  // Pallet assignment is no longer auto-rebuilt — use "Recalculate Pallets" button manually
 }
 
 // Update the lot code summary text for spreadsheet copy
@@ -2764,7 +2757,7 @@ function displayMultiDC(po) {
     palletInput.min = '1';
     palletInput.value = '1';
     palletInput.style.cssText = 'width:60px; padding:6px; border:1px solid #ccc; border-radius:4px;';
-    palletInput.onchange = function() { buildPalletAssignment('_dc' + dcIdx); };
+    // No auto-rebuild — user clicks "Recalculate Pallets" manually
     const palletBtn = document.createElement('button');
     palletBtn.className = 'btn btn-primary';
     palletBtn.textContent = 'Pallet Tags';
