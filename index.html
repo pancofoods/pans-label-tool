@@ -139,7 +139,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.06.30a</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.04a</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -148,7 +148,7 @@
     <div class="card-title">Upload Purchase Order</div>
     <div class="upload-area" id="uploadArea" onclick="document.getElementById('poFile').click()">
       <p class="upload-main">Drop PO PDF here or click to browse</p>
-      <p>Supports UNFI, KeHE, Thrive Market, Foundation Foods, Market of Choice, Sierra Trading Post, HomeGoods, Grocery Outlet, and OSJL orders (PDF, HTML, TXT, or XLSX)</p>
+      <p>Supports UNFI, KeHE, Thrive Market, Foundation Foods, Market of Choice, Sierra Trading Post, HomeGoods, Grocery Outlet, OSJL, and Core-Mark orders (PDF, HTML, TXT, or XLSX)</p>
       <p style="margin-top:6px;"><a href="#" onclick="event.preventDefault();event.stopPropagation();document.getElementById('accountsModal').style.display='flex';" style="font-size:12px;color:#2563eb;text-decoration:underline;">View all supported accounts &amp; DCs</a> &nbsp;|&nbsp; <a href="#" onclick="event.preventDefault();event.stopPropagation();showManualEntry();" style="font-size:12px;color:#2563eb;text-decoration:underline;">Manual entry</a></p>
       <input type="file" id="poFile" accept=".pdf,.html,.htm,.xlsx,.xls,.txt,.text" onchange="handlePOUpload(event)">
     </div>
@@ -170,6 +170,8 @@
             <option value="foundation_foods">Foundation Foods</option>
             <option value="sierra">Sierra / TJX</option>
             <option value="guans">Guan's Mushrooms</option>
+            <option value="coremark_corona">Core-Mark - Corona</option>
+            <option value="coremark_hayward">Core-Mark - Hayward</option>
             <option value="other">Other</option>
           </select>
         </div>
@@ -246,7 +248,7 @@
       <button class="btn btn-primary" onclick="generateAllLabels()" style="margin-top:16px">Generate All Labels</button>
       <div style="margin-top:16px; display:flex; gap:12px; align-items:center;">
         <label style="margin:0;">Total Pallets:</label>
-        <input type="number" id="totalPallets" min="1" value="1" style="width:60px; padding:6px; border:1px solid #ccc; border-radius:4px;">
+        <input type="number" id="totalPallets" min="1" value="1" style="width:60px; padding:6px; border:1px solid #ccc; border-radius:4px;" onchange="buildPalletAssignment()">
         <button class="btn" onclick="buildPalletAssignment('')" style="padding:8px 16px;background:#6b7280;color:white;border-radius:6px;">Recalculate Pallets</button>
         <button class="btn btn-primary" onclick="generatePalletTags()" style="padding:8px 16px;">Generate Pallet Tags</button>
       </div>
@@ -1140,7 +1142,14 @@ function adjustLotQty(prefix, idx, changedLot, totalQty, lotsCount) {
   }
   updateLotSummary(prefix, idx, totalQty);
 
-  // Pallet assignment is no longer auto-rebuilt — use "Recalculate Pallets" button manually
+  // Rebuild pallet assignment with updated lot quantities (debounced)
+  var palletPrefix = '';
+  if (prefix && prefix.endsWith('_')) {
+    var dcNum = prefix.replace('_', '');
+    palletPrefix = '_dc' + dcNum;
+  }
+  if (_palletRefreshTimer) clearTimeout(_palletRefreshTimer);
+  _palletRefreshTimer = setTimeout(function() { buildPalletAssignment(palletPrefix); }, 300);
 }
 
 // Update the lot code summary text for spreadsheet copy
@@ -1482,6 +1491,8 @@ async function processPO(file) {
       }
     }
 
+    console.log('[PDF] Extracted text (' + fullText.length + ' chars):\n' + fullText.substring(0, 1500));
+
     // Check for TJX multi-DC format first (uses position-aware parsing for blank cells)
     if (/ROUTING\s+AND\s+DISTRIBUTION\s+INSTRUCTIONS/i.test(fullText) && pdfRawItems && pdfRawItems.length > 0) {
       const parsed = parseTJXMultiDC(fullText, pdfRawItems);
@@ -1490,6 +1501,18 @@ async function processPO(file) {
         displayMultiDC(parsed);
         statusEl.className = 'status success';
         statusEl.textContent = 'PO #' + parsed.po_number + ' loaded — ' + parsed.shipments.length + ' DCs detected (' + (parsed.banner || 'TJX') + ' multi-DC)';
+        return;
+      }
+    }
+
+    // Check for Core-Mark format (uses position-aware parsing due to columnar PDF layout)
+    if (pdfRawItems && pdfRawItems.length > 0) {
+      const coreMarkParsed = parseCoreMark(pdfRawItems);
+      if (coreMarkParsed) {
+        extractedPO = coreMarkParsed;
+        displayExtracted(coreMarkParsed);
+        statusEl.className = 'status success';
+        statusEl.textContent = 'PO #' + coreMarkParsed.po_number + ' loaded — ' + coreMarkParsed.line_items.length + ' line items found (Core-Mark)';
         return;
       }
     }
@@ -1528,7 +1551,9 @@ var MANUAL_ENTRY_DEFAULTS = {
   grocery_outlet: { name: 'Grocery Outlet', addr: '', csz: '' },
   foundation_foods: { name: 'Foundation Foods LLC', addr: '934 Calle Negocio Ste A', csz: 'San Clemente, CA 92673-6210' },
   sierra: { name: 'Sierra / TJX', addr: '', csz: '' },
-  guans: { name: "Guan's Mushrooms", addr: '6239 Bandini Blvd', csz: 'Commerce, CA 90040' }
+  guans: { name: "Guan's Mushrooms", addr: '6239 Bandini Blvd', csz: 'Commerce, CA 90040' },
+  coremark_corona: { name: 'Core-Mark - Corona', addr: '353 Meyer Circle', csz: 'Corona, CA 92879' },
+  coremark_hayward: { name: 'Core-Mark - Hayward', addr: '31300 Medallion Drive', csz: 'Hayward, CA 94544' }
 };
 
 function showManualEntry() {
@@ -2032,6 +2057,154 @@ function parseHomeGoodsPO(text) {
   return null;
 }
 
+// ======== Core-Mark Position-Aware Parser ========
+// Core-Mark POs have a columnar layout where each line item is a vertical column.
+// PDF.js extracts text items at slightly different Y positions within the same visual row,
+// causing extreme fragmentation. This parser uses raw X,Y coordinates to reconstruct data.
+function parseCoreMark(rawItems) {
+  // Detection: need both "PANS" (product) and "REGISTER" (Core-Mark header) as standalone items
+  var hasPans = rawItems.some(function(i) { return i.str.trim() === 'PANS'; });
+  var hasRegister = rawItems.some(function(i) { return i.str.trim() === 'REGISTER'; });
+  var hasPanco = rawItems.some(function(i) { return /^PANCO$/i.test(i.str.trim()); });
+  if (!hasPans || !hasRegister || !hasPanco) return null;
+
+  console.log('[Core-Mark POS] Position-aware parsing activated');
+
+  // Find column positions from PANS items (each PANS at a unique X = one line item column)
+  var pansItems = rawItems.filter(function(i) { return i.str.trim() === 'PANS'; });
+  var colXs = pansItems.map(function(i) { return i.x; }).sort(function(a, b) { return a - b; });
+  // Deduplicate columns within 5px
+  var columns = [colXs[0]];
+  for (var ci = 1; ci < colXs.length; ci++) {
+    if (colXs[ci] - columns[columns.length - 1] > 5) columns.push(colXs[ci]);
+  }
+  console.log('[Core-Mark POS] Item columns at X:', columns.join(', '));
+
+  // Helper: find which column an X position belongs to (max 20px tolerance)
+  function findCol(x) {
+    var best = -1, bestDist = 999;
+    for (var c = 0; c < columns.length; c++) {
+      var d = Math.abs(x - columns[c]);
+      if (d < bestDist && d < 20) { bestDist = d; best = c; }
+    }
+    return best;
+  }
+
+  // --- PO Number: look for N-NNNNNNN pattern ---
+  var po_number = '';
+  for (var pi = 0; pi < rawItems.length; pi++) {
+    var poM = rawItems[pi].str.trim().match(/^(\d{1,2}-\d{6,8})$/);
+    if (poM) { po_number = poM[1]; break; }
+  }
+  console.log('[Core-Mark POS] PO#:', po_number);
+
+  // --- Flavors: find "JRKY MUSHROOMS <flavor>" items and map to columns ---
+  var flavors = [];
+  for (var fi = 0; fi < columns.length; fi++) flavors.push('');
+  var descItems = rawItems.filter(function(i) { return /JRKY\s+MUSHROOMS/i.test(i.str); });
+  for (var di = 0; di < descItems.length; di++) {
+    var desc = descItems[di];
+    var col = findCol(desc.x);
+    if (col < 0) continue;
+    // Strip prefix and trailing noise to isolate flavor
+    var cleaned = desc.str.replace(/^.*?MUSHROOMS?\s+/i, '')
+                         .replace(/\s+(?:Pr:|XM:|WH:|Dat:|take|Will|confirm|AP:|Pls).*/i, '')
+                         .trim();
+    if (/^S\/P$|SALT.*PEP|SLT.*PPR/i.test(cleaned)) flavors[col] = 'Salt & Pepper';
+    else if (/ZEST|THAI/i.test(cleaned)) flavors[col] = 'Zesty Thai';
+    else if (/BBQ|APLWD|APPLEWOOD/i.test(cleaned)) flavors[col] = 'Applewood BBQ';
+    else if (/CURRY/i.test(cleaned)) flavors[col] = 'Curry';
+    else if (/TERIY/i.test(cleaned)) flavors[col] = 'Teriyaki';
+    else if (/ORIG/i.test(cleaned)) flavors[col] = 'Original';
+    else flavors[col] = cleaned || 'Original';
+    console.log('[Core-Mark POS] Col ' + col + ' flavor:', flavors[col], '(raw: "' + cleaned + '")');
+  }
+
+  // --- Quantities: find numbers near CS items at matching column X ---
+  var csItems = rawItems.filter(function(i) { return i.str.trim() === 'CS'; });
+  var quantities = [];
+  for (var qi2 = 0; qi2 < columns.length; qi2++) quantities.push(0);
+
+  if (csItems.length > 0) {
+    var csY = csItems[0].y; // Y-band where quantities live
+    // Numbers within 20px of CS Y, 1-4 digits
+    var qtyItems = rawItems.filter(function(i) {
+      return Math.abs(i.y - csY) < 20 && /^\d{1,4}$/.test(i.str.trim());
+    });
+    for (var qi = 0; qi < qtyItems.length; qi++) {
+      var qCol = findCol(qtyItems[qi].x);
+      if (qCol >= 0) {
+        var qVal = parseInt(qtyItems[qi].str.trim());
+        if (qVal > 0 && qVal <= 1000) {
+          quantities[qCol] = qVal;
+          console.log('[Core-Mark POS] Col ' + qCol + ' qty:', qVal);
+        }
+      }
+    }
+  }
+
+  // --- Ship-to: extract from bottom section (low Y, x < 100) ---
+  var minY = Infinity;
+  rawItems.forEach(function(i) {
+    if (i.x < 100 && !/^-+$/.test(i.str.trim()) && i.str.trim().length > 0 && i.y < minY) minY = i.y;
+  });
+
+  // Bottom row: city (x~68), street start (x~76), state (x~92)
+  var bottomLine = rawItems.filter(function(i) { return Math.abs(i.y - minY) < 5 && i.x < 100; });
+  bottomLine.sort(function(a, b) { return a.x - b.x; });
+
+  var city = (bottomLine.find(function(i) { return i.x >= 60 && i.x <= 72; }) || {str:''}).str.trim();
+  var streetStart = (bottomLine.find(function(i) { return i.x >= 73 && i.x <= 80; }) || {str:''}).str.trim();
+  var stateItem = bottomLine.find(function(i) { return /^[A-Z]{2}$/.test(i.str.trim()); });
+  var state = stateItem ? stateItem.str.trim() : '';
+
+  // Zip: 5-digit number in bottom area (y < 100, x < 100, above bottom row)
+  var zipItem = rawItems.find(function(i) {
+    return /^\d{5}$/.test(i.str.trim()) && i.y < 100 && i.x < 100 && i.y > minY;
+  });
+  var zip = zipItem ? zipItem.str.trim() : '';
+
+  // Street continuation: text at x~76, between bottom row and y=120
+  var streetContItems = rawItems.filter(function(i) {
+    return i.x >= 73 && i.x <= 80 && i.y > minY + 15 && i.y < 120 &&
+           !/^\d{5}$/.test(i.str.trim()) && !/^CS$/i.test(i.str.trim()) &&
+           !/^[A-Z]{2}$/.test(i.str.trim()) && i.str.trim().length > 2;
+  });
+  var streetCont = streetContItems.map(function(i) { return i.str.trim(); }).join(' ');
+
+  var fullAddr = streetStart + (streetCont ? ' ' + streetCont : '');
+  var cityTitle = city.split(/\s+/).map(function(w) {
+    return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+  }).join(' ');
+  var ship_name = 'Core-Mark - ' + cityTitle;
+  var ship_csz = cityTitle + ', ' + state + ' ' + zip;
+
+  console.log('[Core-Mark POS] Ship-to:', ship_name, '|', fullAddr, '|', ship_csz);
+
+  // --- Build line items ---
+  var line_items = [];
+  for (var li = 0; li < columns.length; li++) {
+    if (flavors[li] && quantities[li] > 0) {
+      line_items.push({ flavor: flavors[li], qty: quantities[li] });
+    }
+  }
+
+  if (line_items.length === 0) {
+    console.log('[Core-Mark POS] No valid items found, falling through to parsePO');
+    return null;
+  }
+
+  console.log('[Core-Mark POS] Success:', JSON.stringify({ po_number: po_number, ship_name: ship_name, items: line_items }));
+
+  return {
+    po_number: po_number,
+    ship_name: ship_name,
+    ship_addr: fullAddr,
+    ship_csz: ship_csz,
+    line_items: line_items
+  };
+}
+
 function parsePO(text) {
   // Detect format
   const isGroceryOutlet = /Grocery\s*Outlet/i.test(text);
@@ -2040,8 +2213,14 @@ function parsePO(text) {
   const isHomeGoods = !isGroceryOutlet && /HomeGoods|ROUTING\s+AND\s+DISTRIBUTION\s+INSTRUCTIONS/i.test(text);
   const isSierra = !isHomeGoods && !isGroceryOutlet && /Sierra|sierratradingpost|TJX\s+Certificate/i.test(text);
   const isFoundationFoods = !isGroceryOutlet && /Foundation\s*Foods/i.test(text);
-  const isOSJL = !isGroceryOutlet && !isThrive && !isKeHE && !isHomeGoods && !isSierra && !isFoundationFoods && /Ocean\s*State|Job\s*Lot|OSJL/i.test(text);
-  const isUNFI = !isThrive && !isKeHE && !isSierra && !isHomeGoods && !isGroceryOutlet && !isFoundationFoods && !isOSJL && /UNFI|SUPERVALU|Greenwood|PANCO/i.test(text);
+  const isCoreMark = !isGroceryOutlet && !isThrive && !isKeHE && !isHomeGoods && !isSierra && !isFoundationFoods && (
+    /Core.?Mark/i.test(text) || /PANS\s+JR?KY\s+MUSHROOMS?/i.test(text) ||
+    (/PANCO\s+FOODS/i.test(text) && /\bDESTINATION\b/i.test(text))
+  );
+  const isOSJL = !isGroceryOutlet && !isThrive && !isKeHE && !isHomeGoods && !isSierra && !isFoundationFoods && !isCoreMark && /Ocean\s*State|Job\s*Lot|OSJL/i.test(text);
+  const isUNFI = !isCoreMark && !isThrive && !isKeHE && !isSierra && !isHomeGoods && !isGroceryOutlet && !isFoundationFoods && !isOSJL && /UNFI|SUPERVALU|Greenwood|PANCO/i.test(text);
+
+  console.log('[parsePO] Detection:', { isCoreMark, isUNFI, isKeHE, isThrive, isSierra, isHomeGoods, isGroceryOutlet, isOSJL, isFoundationFoods });
 
   // HomeGoods: delegate to dedicated parser immediately
   if (isHomeGoods) {
@@ -2069,6 +2248,10 @@ function parsePO(text) {
   } else if (isOSJL) {
     const poMatch = text.match(/P\.?O\.?\s*#?\s*:?\s*(\d{5,})/i) || text.match(/Purchase\s*Order\s*#?\s*:?\s*(\d+)/i) || text.match(/\bPO\s*(\d{6,})\b/i);
     po_number = poMatch ? poMatch[1] : '';
+  } else if (isCoreMark) {
+    const poMatch = text.match(/PURCHASE\s*#\s*([\d]+-[\d]+)/i) || text.match(/\b(\d{1,2}\s*-\s*\d{6,8})\b/);
+    po_number = poMatch ? poMatch[1].replace(/\s/g, '') : '';
+    console.log('[Core-Mark] PO# match:', poMatch ? poMatch[0] : 'NONE', '→', po_number);
   } else if (isFoundationFoods) {
     const poMatch = text.match(/P\.?O\.?\s*(?:NO\.?|#|Number)\s*:?\s*(\d+)/i);
     po_number = poMatch ? poMatch[1] : '';
@@ -2291,6 +2474,26 @@ function parsePO(text) {
     if (goBlockMatch) {
       ship_addr = goBlockMatch[1].trim();
       ship_csz = goBlockMatch[2].trim().replace(/,\s*,/, ',');
+    }
+  } else if (isCoreMark) {
+    // Core-Mark: SHIP TO is top-left. Text reads: CITY VENDOR# PANCO FOODS INC STREET ... CITY STATE ZIP ... CAMAS WA 98607
+    console.log('[Core-Mark] Parsing ship-to...');
+    const cmCityMatch = text.match(/([A-Z]{3,}(?:\s+[A-Z]{3,})?)\s+\d{2,3}\s+PANCO/);
+    if (cmCityMatch) {
+      const city = cmCityMatch[1].trim();
+      const cityTitle = city.split(/\s+/).map(function(w) { return w.charAt(0) + w.slice(1).toLowerCase(); }).join(' ');
+      ship_name = 'Core-Mark - ' + cityTitle;
+      // Street address: between "PANCO FOODS INC" and arrival date
+      const addrMatch = text.match(/PANCO\s+FOODS\s+INC\s+(\d+\s+[\w\s]+?(?:DRIVE|CIRCLE|AVE|AVENUE|ST|STREET|BLVD|BOULEVARD|RD|ROAD|WAY|LN|LANE|PKWY|PARKWAY|CT|HWY|LOOP|PL))\b/i);
+      if (addrMatch) ship_addr = addrMatch[1].trim();
+      // CSZ: find STATE ZIP that is NOT the vendor address (CAMAS WA 98607)
+      const zipAll = text.match(/\b([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\b/g) || [];
+      for (var zi = 0; zi < zipAll.length; zi++) {
+        if (!/WA\s+98607/i.test(zipAll[zi])) {
+          ship_csz = cityTitle + ', ' + zipAll[zi];
+          break;
+        }
+      }
     }
   } else {
     // Generic/other format
@@ -2568,6 +2771,64 @@ function parsePO(text) {
         }
       }
     }
+  } else if (isCoreMark) {
+    // Core-Mark: items as "QTY CS [item codes] PANS JRKY MUSHROOMS FLAVOR CASE SELL COST"
+    console.log('[Core-Mark] Parsing line items...');
+    // Approach 1: global regex matching QTY CS ... PANS JRKY MUSHROOMS FLAVOR ... NUMBERS
+    var cmPattern = /(\d+)\s+CS\b[\s\S]{0,150}?PANS\s+JR?KY\s+MUSHROOMS?\s*([\s\S]{0,30}?)(?:\s+\d+\s+\d+\s+[\d.]+)/gi;
+    var cmMatch;
+    while ((cmMatch = cmPattern.exec(text)) !== null) {
+      var cmQty = parseInt(cmMatch[1]);
+      var cmFlavorText = cmMatch[2].trim();
+      var cmFlavor = 'Original';
+      if (/S\/P|SALT.*PEP|SLT.*PPR/i.test(cmFlavorText)) cmFlavor = 'Salt & Pepper';
+      else if (/ZEST|THAI/i.test(cmFlavorText)) cmFlavor = 'Zesty Thai';
+      else if (/BBQ|APLWD|APPLEWOOD/i.test(cmFlavorText)) cmFlavor = 'Applewood BBQ';
+      else if (/CURRY/i.test(cmFlavorText)) cmFlavor = 'Curry';
+      else if (/TERIY/i.test(cmFlavorText)) cmFlavor = 'Teriyaki';
+      else if (/ORIG/i.test(cmFlavorText)) cmFlavor = 'Original';
+      if (cmQty > 0) line_items.push({ flavor: cmFlavor, qty: cmQty });
+      console.log('[Core-Mark] Item match:', cmQty, cmFlavor, '(raw flavor text: "' + cmFlavorText + '")');
+    }
+    // Approach 2 fallback: if regex failed, scan for CS quantities and flavor keywords separately
+    if (line_items.length === 0) {
+      console.log('[Core-Mark] Regex approach failed, trying keyword scan...');
+      var csMatches = text.match(/(\d+)\s+CS\b/gi) || [];
+      console.log('[Core-Mark] CS matches:', csMatches);
+      var flavorKw = [
+        [/S\/P|SALT\s*.*PEP/i, 'Salt & Pepper'],
+        [/ZEST|THAI/i, 'Zesty Thai'],
+        [/ORIG/i, 'Original'],
+        [/BBQ|APLWD|APPLEWOOD/i, 'Applewood BBQ'],
+        [/CURRY/i, 'Curry'],
+        [/TERIY/i, 'Teriyaki']
+      ];
+      // Find lines containing "PANS" or "MUSHROOM" and extract qty + flavor
+      var textLines = text.split('\n');
+      for (var tli = 0; tli < textLines.length; tli++) {
+        var tl = textLines[tli];
+        if (!/PANS|MUSHROOM/i.test(tl)) continue;
+        console.log('[Core-Mark] PANS line ' + tli + ':', tl.substring(0, 120));
+        var tlQty = 0;
+        // Look for "N CS" on this line or the previous line
+        var csOnLine = tl.match(/(\d+)\s+CS\b/i);
+        if (csOnLine) {
+          tlQty = parseInt(csOnLine[1]);
+        } else if (tli > 0) {
+          var prevCs = textLines[tli - 1].match(/(\d+)\s+CS\b/i);
+          if (prevCs) tlQty = parseInt(prevCs[1]);
+        }
+        var tlFlavor = 'Original';
+        for (var fki = 0; fki < flavorKw.length; fki++) {
+          if (flavorKw[fki][0].test(tl)) { tlFlavor = flavorKw[fki][1]; break; }
+        }
+        if (tlQty > 0) {
+          line_items.push({ flavor: tlFlavor, qty: tlQty });
+          console.log('[Core-Mark] Fallback item:', tlQty, tlFlavor);
+        }
+      }
+    }
+    console.log('[Core-Mark] Final items:', JSON.stringify(line_items));
   } else {
     // Generic format: try UPC matching
     for (const [upc, flavor] of Object.entries(UPC_MAP)) {
@@ -2757,7 +3018,7 @@ function displayMultiDC(po) {
     palletInput.min = '1';
     palletInput.value = '1';
     palletInput.style.cssText = 'width:60px; padding:6px; border:1px solid #ccc; border-radius:4px;';
-    // No auto-rebuild — user clicks "Recalculate Pallets" manually
+    palletInput.onchange = function() { buildPalletAssignment('_dc' + dcIdx); };
     const palletBtn = document.createElement('button');
     palletBtn.className = 'btn btn-primary';
     palletBtn.textContent = 'Pallet Tags';
@@ -4074,6 +4335,9 @@ function matchShipToName(shipToName) {
   if (name.includes('market of choice') || name.includes('mcdc')) return 'market_of_choice';
   if (name.includes('ocean state') || name.includes('job lot') || name.includes('osjl') || name.includes('kingstown')) return 'osjl';
   if (name.includes("guan")) return 'guans';
+  if (name.includes('core-mark') || name.includes('core mark') || name.includes('coremark')) return 'coremark';
+  if (name.includes('corona') && name.includes('mark')) return 'coremark';
+  if (name.includes('hayward') && name.includes('mark')) return 'coremark';
   return null;
 }
 
@@ -6029,7 +6293,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.06.30a</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.07.04a</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
