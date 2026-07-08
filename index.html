@@ -677,6 +677,18 @@ function attachLotPickers() {
         }
       });
     });
+  } else if (po.isGrove && po.line_items) {
+    // Grove: lot/bb inputs use grove_ prefix
+    po.line_items.forEach(function(item, i) {
+      var numBoxes = parseInt(document.getElementById('grove_boxes_' + i)?.value) || 1;
+      if (numBoxes > 1) {
+        for (var b = 0; b < numBoxes; b++) {
+          wrapWithLotPicker('grove_boxlot_' + i + '_' + b, 'grove_boxbb_' + i + '_' + b, item.flavor);
+        }
+      } else {
+        wrapWithLotPicker('grove_lot_' + i, 'grove_bb_' + i, item.flavor);
+      }
+    });
   } else if (po.line_items) {
     po.line_items.forEach(function(item, i) {
       const lotsInput = document.getElementById('lots_' + i);
@@ -3064,6 +3076,7 @@ function displayGroveOrder(po) {
 
   document.getElementById('lineItemsCard').style.display = 'block';
   document.getElementById('lineItemsCard').scrollIntoView({ behavior: 'smooth' });
+  setTimeout(attachLotPickers, 100);
 }
 
 function expandGroveBoxes(idx, totalQty) {
@@ -3100,6 +3113,8 @@ function expandGroveBoxes(idx, totalQty) {
     // Insert after the last sub-row so they appear in order
     parentRow = subTr;
   }
+  // Attach lot pickers to the new sub-row inputs
+  setTimeout(attachLotPickers, 100);
 }
 
 function displayMultiDC(po) {
