@@ -2892,19 +2892,29 @@ function parsePO(text) {
   } else if (isGrove) {
     // Grove: quantities in individual units (Each), not cases
     // Grove uses their own vendor part numbers (PMJ105=S&P, PMJ107=BBQ, etc.)
-    // that don't match our internal SKUs, so parse by flavor name from "Product:" descriptions
-    console.log('[Grove] Parsing line items by flavor name from Product descriptions...');
-    var groveLineRe = /Product:\s*[^;]+;\s*((?:Salt\s*&?\s*Pepper|Original|Applewood\s*(?:BBQ)?|Curry|Zesty\s*Thai|Teriyaki))\s+Mushroom\s+Jerky.*?(\d+(?:\.\d+)?)\s+Each/gi;
-    var groveLineM;
-    while ((groveLineM = groveLineRe.exec(text)) !== null) {
-      var groveFlavor = groveLineM[1].trim();
-      // Normalize flavor names to match PRODUCTS keys
-      if (/salt/i.test(groveFlavor)) groveFlavor = 'Salt & Pepper';
-      else if (/applewood/i.test(groveFlavor)) groveFlavor = 'Applewood BBQ';
-      else if (/zesty/i.test(groveFlavor)) groveFlavor = 'Zesty Thai';
-      // Original, Curry, Teriyaki match as-is with first-letter capitalization
-      var groveQty = Math.round(parseFloat(groveLineM[2]));
-      if (groveQty > 0 && !line_items.some(function(li) { return li.flavor === groveFlavor; })) {
+    // that don't match our internal SKUs, so parse by flavor name from product descriptions.
+    // Row-based text extraction splits flavors across lines (columns at different Y positions),
+    // so scan each line for "N.0 Each" qty, then combine with next 2 lines to find flavor.
+    console.log('[Grove] Parsing line items by flavor keywords + Each qty...');
+    var groveLines = text.split('\n');
+    for (var gi = 0; gi < groveLines.length; gi++) {
+      var gLine = groveLines[gi];
+      var eachMatch = gLine.match(/(\d+(?:\.\d+)?)\s+Each/i);
+      if (!eachMatch) continue;
+      var groveQty = Math.round(parseFloat(eachMatch[1]));
+      if (groveQty <= 0 || groveQty > 5000) continue;
+      // Combine this line + next 2 lines to capture full flavor name
+      var combined = gLine + ' ' + (groveLines[gi+1] || '') + ' ' + (groveLines[gi+2] || '');
+      // Keywords may be split across lines with other text in between,
+      // so test each keyword individually rather than requiring adjacency
+      var groveFlavor = null;
+      if (/Salt/i.test(combined) && /Pepper/i.test(combined)) groveFlavor = 'Salt & Pepper';
+      else if (/Applewood/i.test(combined)) groveFlavor = 'Applewood BBQ';
+      else if (/Zesty/i.test(combined) && /Thai/i.test(combined)) groveFlavor = 'Zesty Thai';
+      else if (/Teriyaki/i.test(combined) && /Mushroom/i.test(combined)) groveFlavor = 'Teriyaki';
+      else if (/Curry/i.test(combined) && /Mushroom/i.test(combined)) groveFlavor = 'Curry';
+      else if (/Original/i.test(combined) && /Mushroom/i.test(combined)) groveFlavor = 'Original';
+      if (groveFlavor && !line_items.some(function(li) { return li.flavor === groveFlavor; })) {
         line_items.push({ flavor: groveFlavor, qty: groveQty });
         console.log('[Grove] Item:', groveFlavor, groveQty, 'units');
       }
