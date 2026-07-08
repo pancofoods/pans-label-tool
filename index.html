@@ -139,7 +139,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.04a</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.08a</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -172,6 +172,7 @@
             <option value="guans">Guan's Mushrooms</option>
             <option value="coremark_corona">Core-Mark - Corona</option>
             <option value="coremark_hayward">Core-Mark - Hayward</option>
+            <option value="grove">Grove Collaborative</option>
             <option value="other">Other</option>
           </select>
         </div>
@@ -269,6 +270,23 @@
         <div id="rtsStatus" style="margin-top:8px; font-size:12px;"></div>
       </div>
       <div id="lotCodeSummary" style="display:none;"></div>
+    </div>
+    <div id="groveContent" style="display:none">
+      <div style="background:#f0fdf4; border:1px solid #86efac; padding:8px 12px; border-radius:6px; margin-bottom:12px; font-size:13px;">
+        <strong>Grove Collaborative</strong> — Loose units, one flavor per box. Enter lot code and best-by date, then download labels.
+      </div>
+      <table class="line-items" id="groveItemsTable">
+        <thead><tr>
+          <th>Flavor</th>
+          <th class="qty-col">Units</th>
+          <th class="qty-col">Boxes</th>
+          <th class="bb-col">B.B. Date</th>
+          <th class="lot-col">LOT Code</th>
+          <th></th>
+        </tr></thead>
+        <tbody id="groveItemsBody"></tbody>
+      </table>
+      <button class="btn btn-primary" onclick="generateAllGroveLabels()" style="margin-top:16px">Generate All Labels</button>
     </div>
     <div id="multiDCContent" style="display:none"></div>
     <div class="status" id="batchStatus"></div>
@@ -1526,7 +1544,12 @@ async function processPO(file) {
     }
 
     extractedPO = parsed;
-    if (parsed.multi_dc) {
+    if (parsed.isGrove) {
+      displayGroveOrder(parsed);
+      statusEl.className = 'status success';
+      var totalUnits = parsed.line_items.reduce(function(s, i) { return s + i.qty; }, 0);
+      statusEl.textContent = 'PO #' + parsed.po_number + ' loaded — ' + parsed.line_items.length + ' flavors, ' + totalUnits + ' units (Grove loose-pack)';
+    } else if (parsed.multi_dc) {
       displayMultiDC(parsed);
       statusEl.className = 'status success';
       statusEl.textContent = 'PO #' + parsed.po_number + ' loaded — ' + parsed.shipments.length + ' DCs detected (TJX multi-DC)';
@@ -1553,7 +1576,8 @@ var MANUAL_ENTRY_DEFAULTS = {
   sierra: { name: 'Sierra / TJX', addr: '', csz: '' },
   guans: { name: "Guan's Mushrooms", addr: '6239 Bandini Blvd', csz: 'Commerce, CA 90040' },
   coremark_corona: { name: 'Core-Mark - Corona', addr: '353 Meyer Circle', csz: 'Corona, CA 92879' },
-  coremark_hayward: { name: 'Core-Mark - Hayward', addr: '31300 Medallion Drive', csz: 'Hayward, CA 94544' }
+  coremark_hayward: { name: 'Core-Mark - Hayward', addr: '31300 Medallion Drive', csz: 'Hayward, CA 94544' },
+  grove: { name: 'Grove Collaborative', addr: '', csz: '' }
 };
 
 function showManualEntry() {
@@ -2217,10 +2241,11 @@ function parsePO(text) {
     /Core.?Mark/i.test(text) || /PANS\s+JR?KY\s+MUSHROOMS?/i.test(text) ||
     (/PANCO\s+FOODS/i.test(text) && /\bDESTINATION\b/i.test(text))
   );
-  const isOSJL = !isGroceryOutlet && !isThrive && !isKeHE && !isHomeGoods && !isSierra && !isFoundationFoods && !isCoreMark && /Ocean\s*State|Job\s*Lot|OSJL/i.test(text);
-  const isUNFI = !isCoreMark && !isThrive && !isKeHE && !isSierra && !isHomeGoods && !isGroceryOutlet && !isFoundationFoods && !isOSJL && /UNFI|SUPERVALU|Greenwood|PANCO/i.test(text);
+  const isGrove = !isGroceryOutlet && !isThrive && !isKeHE && !isHomeGoods && !isSierra && !isFoundationFoods && !isCoreMark && /Grove\s+Collaborative/i.test(text);
+  const isOSJL = !isGroceryOutlet && !isThrive && !isKeHE && !isHomeGoods && !isSierra && !isFoundationFoods && !isCoreMark && !isGrove && /Ocean\s*State|Job\s*Lot|OSJL/i.test(text);
+  const isUNFI = !isCoreMark && !isThrive && !isKeHE && !isSierra && !isHomeGoods && !isGroceryOutlet && !isFoundationFoods && !isOSJL && !isGrove && /UNFI|SUPERVALU|Greenwood|PANCO/i.test(text);
 
-  console.log('[parsePO] Detection:', { isCoreMark, isUNFI, isKeHE, isThrive, isSierra, isHomeGoods, isGroceryOutlet, isOSJL, isFoundationFoods });
+  console.log('[parsePO] Detection:', { isCoreMark, isUNFI, isKeHE, isThrive, isSierra, isHomeGoods, isGroceryOutlet, isOSJL, isFoundationFoods, isGrove });
 
   // HomeGoods: delegate to dedicated parser immediately
   if (isHomeGoods) {
@@ -2252,6 +2277,9 @@ function parsePO(text) {
     const poMatch = text.match(/PURCHASE\s*#\s*([\d]+-[\d]+)/i) || text.match(/\b(\d{1,2}\s*-\s*\d{6,8})\b/);
     po_number = poMatch ? poMatch[1].replace(/\s/g, '') : '';
     console.log('[Core-Mark] PO# match:', poMatch ? poMatch[0] : 'NONE', '→', po_number);
+  } else if (isGrove) {
+    const poMatch = text.match(/Order\s*#:?\s*(\d+)/i);
+    po_number = poMatch ? poMatch[1] : '';
   } else if (isFoundationFoods) {
     const poMatch = text.match(/P\.?O\.?\s*(?:NO\.?|#|Number)\s*:?\s*(\d+)/i);
     po_number = poMatch ? poMatch[1] : '';
@@ -2495,6 +2523,38 @@ function parsePO(text) {
         }
       }
     }
+  } else if (isGrove) {
+    // Grove: Ship-to and Bill-to are side-by-side in PDF, text is interleaved
+    // Warehouse name: "NNN XX WH CityName"
+    var groveWhMatch = text.match(/\b(\d+\s+[A-Z]{2}\s+WH\s+[A-Za-z]+(?:\s+[A-Za-z]+)?)\b/);
+    if (groveWhMatch) ship_name = groveWhMatch[1].trim();
+    // Street address: number + word starting with letter + suffix, exclude Grove HQ (Sansome)
+    var groveStreetRe = /\b(\d+\s+[A-Z][a-z]+(?:\s+[A-Za-z]+)*?\s+(?:Road|Drive|Ave|Avenue|Street|Blvd|Boulevard|Way|Lane|Ln|Circle|Pkwy|Ct))\b/gi;
+    var groveStM;
+    while ((groveStM = groveStreetRe.exec(text)) !== null) {
+      if (!/Sansome/i.test(groveStM[1])) { ship_addr = groveStM[1].trim(); break; }
+    }
+    // CSZ: find "City, ST XXXXX US" — single-word city to avoid capturing street names
+    var groveCszRe = /\b([A-Z][a-z]{2,})\s*,\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s+US\b/g;
+    var groveCszM;
+    while ((groveCszM = groveCszRe.exec(text)) !== null) {
+      if (!/San/i.test(groveCszM[1])) {
+        ship_csz = groveCszM[1].trim() + ', ' + groveCszM[2] + ' ' + groveCszM[3];
+        break;
+      }
+    }
+    // Fallback for multi-word cities or no "US" suffix: two-word city, exclude street suffixes
+    if (!ship_csz) {
+      var groveCszRe2 = /\b([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]+)?)\s*,\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/g;
+      var groveCszM2;
+      while ((groveCszM2 = groveCszRe2.exec(text)) !== null) {
+        if (!/San\s*Francisco/i.test(groveCszM2[0]) && !/^(?:Road|Street|Drive|Avenue|Boulevard|Lane|Way|Court|Circle|Parkway)\b/i.test(groveCszM2[1])) {
+          ship_csz = groveCszM2[1].trim() + ', ' + groveCszM2[2] + ' ' + groveCszM2[3];
+          break;
+        }
+      }
+    }
+    console.log('[Grove] Ship-to:', ship_name, '|', ship_addr, '|', ship_csz);
   } else {
     // Generic/other format
     const shipMatch = text.match(/Ship\s*To:.*?Location\s*ID:\s*\S+\s+([A-Z][A-Z\s&]+?)\s+(\d+[\w\s]+(?:AVE|AVENUE|ST|STREET|DR|DRIVE|BLVD|BOULEVARD|RD|ROAD|WAY|LN|LANE|CT|PKWY|PARKWAY)[\w\s.]*)\s+([A-Z][A-Za-z\s]+,\s*[A-Z]{2}\s+\d{5})/i);
@@ -2829,6 +2889,27 @@ function parsePO(text) {
       }
     }
     console.log('[Core-Mark] Final items:', JSON.stringify(line_items));
+  } else if (isGrove) {
+    // Grove: quantities in individual units (Each), not cases
+    // Grove uses their own vendor part numbers (PMJ105=S&P, PMJ107=BBQ, etc.)
+    // that don't match our internal SKUs, so parse by flavor name from "Product:" descriptions
+    console.log('[Grove] Parsing line items by flavor name from Product descriptions...');
+    var groveLineRe = /Product:\s*[^;]+;\s*((?:Salt\s*&?\s*Pepper|Original|Applewood\s*(?:BBQ)?|Curry|Zesty\s*Thai|Teriyaki))\s+Mushroom\s+Jerky.*?(\d+(?:\.\d+)?)\s+Each/gi;
+    var groveLineM;
+    while ((groveLineM = groveLineRe.exec(text)) !== null) {
+      var groveFlavor = groveLineM[1].trim();
+      // Normalize flavor names to match PRODUCTS keys
+      if (/salt/i.test(groveFlavor)) groveFlavor = 'Salt & Pepper';
+      else if (/applewood/i.test(groveFlavor)) groveFlavor = 'Applewood BBQ';
+      else if (/zesty/i.test(groveFlavor)) groveFlavor = 'Zesty Thai';
+      // Original, Curry, Teriyaki match as-is with first-letter capitalization
+      var groveQty = Math.round(parseFloat(groveLineM[2]));
+      if (groveQty > 0 && !line_items.some(function(li) { return li.flavor === groveFlavor; })) {
+        line_items.push({ flavor: groveFlavor, qty: groveQty });
+        console.log('[Grove] Item:', groveFlavor, groveQty, 'units');
+      }
+    }
+    console.log('[Grove] Final items:', JSON.stringify(line_items));
   } else {
     // Generic format: try UPC matching
     for (const [upc, flavor] of Object.entries(UPC_MAP)) {
@@ -2851,7 +2932,9 @@ function parsePO(text) {
 
   // Sierra and Thrive ship without POP displays - simplified label info
   const noDisplay = (isThrive || isSierra);
-  return { po_number, ship_name, ship_addr, ship_csz, line_items, noDisplay, fulfillment: fulfillment || '' };
+  const result = { po_number, ship_name, ship_addr, ship_csz, line_items, noDisplay, fulfillment: fulfillment || '' };
+  if (isGrove) result.isGrove = true;
+  return result;
 }
 
 function displayExtracted(po) {
@@ -2924,6 +3007,88 @@ function displayExtracted(po) {
     ssccShowForThrive(po);
   } else {
     document.getElementById('ssccCard').style.display = 'none';
+  }
+}
+
+// ─── Grove Collaborative Display ───
+function displayGroveOrder(po) {
+  // Hide other content sections
+  document.getElementById('singleDCContent').style.display = 'none';
+  document.getElementById('multiDCContent').style.display = 'none';
+  document.getElementById('multiDCContent').innerHTML = '';
+  document.getElementById('groveContent').style.display = 'block';
+  document.getElementById('ssccCard').style.display = 'none';
+
+  // Hide standard ship-to fields and pallet/lot sections that don't apply
+  document.querySelectorAll('#lineItemsCard > .form-row').forEach(function(el) { el.style.display = 'none'; });
+  var osjlRts = document.getElementById('osjlRtsSection');
+  if (osjlRts) osjlRts.style.display = 'none';
+  var lotSummary = document.getElementById('lotCodeSummary');
+  if (lotSummary) lotSummary.style.display = 'none';
+
+  document.getElementById('poTitle').textContent = '— PO #' + po.po_number + ' (Grove)';
+
+  // Store ship-to in hidden fields for label generation
+  var shipNameEl = document.getElementById('ex_ship_name');
+  var shipAddrEl = document.getElementById('ex_ship_addr');
+  var shipCszEl = document.getElementById('ex_ship_csz');
+  if (shipNameEl) shipNameEl.value = po.ship_name || '';
+  if (shipAddrEl) shipAddrEl.value = po.ship_addr || '';
+  if (shipCszEl) shipCszEl.value = po.ship_csz || '';
+
+  var tbody = document.getElementById('groveItemsBody');
+  tbody.innerHTML = '';
+
+  po.line_items.forEach(function(item, i) {
+    var tr = document.createElement('tr');
+    tr.id = 'grove_row_' + i;
+    tr.innerHTML =
+      '<td class="flavor-col">' + flavorDisplay(item.flavor) + '</td>' +
+      '<td class="qty-col" style="font-weight:600">' + item.qty + ' units</td>' +
+      '<td class="qty-col"><input type="number" id="grove_boxes_' + i + '" value="1" min="1" max="20" style="width:60px;text-align:center" onchange="expandGroveBoxes(' + i + ', ' + item.qty + ')"></td>' +
+      '<td><input type="text" id="grove_bb_' + i + '" placeholder="MM/DD/YY"></td>' +
+      '<td><input type="text" id="grove_lot_' + i + '" placeholder="Lot code"></td>' +
+      '<td><button class="btn" onclick="generateGroveFlavorLabels(' + i + ')" style="padding:6px 12px;font-size:12px;background:#059669;color:white;border-radius:6px;white-space:nowrap">Download</button></td>';
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('lineItemsCard').style.display = 'block';
+  document.getElementById('lineItemsCard').scrollIntoView({ behavior: 'smooth' });
+}
+
+function expandGroveBoxes(idx, totalQty) {
+  var boxesInput = document.getElementById('grove_boxes_' + idx);
+  var numBoxes = parseInt(boxesInput.value) || 1;
+
+  // Remove any existing sub-rows for this flavor
+  var oldSubs = document.querySelectorAll('.grove-sub-row-' + idx);
+  oldSubs.forEach(function(el) { el.remove(); });
+
+  if (numBoxes <= 1) return; // Single box, no sub-rows needed
+
+  // Auto-split: divide units evenly, remainder goes on first box
+  var perBox = Math.floor(totalQty / numBoxes);
+  var remainder = totalQty - (perBox * numBoxes);
+
+  var parentRow = document.getElementById('grove_row_' + idx);
+  var bb = document.getElementById('grove_bb_' + idx).value || '';
+  var lot = document.getElementById('grove_lot_' + idx).value || '';
+
+  for (var b = 0; b < numBoxes; b++) {
+    var boxQty = perBox + (b === 0 ? remainder : 0);
+    var subTr = document.createElement('tr');
+    subTr.className = 'grove-sub-row-' + idx;
+    subTr.style.background = '#f0fdf4';
+    subTr.innerHTML =
+      '<td style="padding-left:28px;font-size:12px;color:#666">└ Box ' + (b + 1) + ' of ' + numBoxes + '</td>' +
+      '<td class="qty-col"><input type="number" id="grove_boxqty_' + idx + '_' + b + '" value="' + boxQty + '" min="1" style="width:70px;text-align:center"></td>' +
+      '<td class="qty-col" style="font-size:12px;color:#888">' + (b + 1) + '/' + numBoxes + '</td>' +
+      '<td><input type="text" id="grove_boxbb_' + idx + '_' + b + '" value="' + bb + '" placeholder="MM/DD/YY" style="font-size:12px"></td>' +
+      '<td><input type="text" id="grove_boxlot_' + idx + '_' + b + '" value="' + lot + '" placeholder="Lot code" style="font-size:12px"></td>' +
+      '<td></td>';
+    parentRow.parentNode.insertBefore(subTr, parentRow.nextSibling);
+    // Insert after the last sub-row so they appear in order
+    parentRow = subTr;
   }
 }
 
@@ -3999,6 +4164,191 @@ function generateAllLabels() {
   }
 }
 
+// ─── Grove Collaborative Label Generation ───
+function addGroveLabelPage(doc, product, flavor, order) {
+  var W = 432, H = 288;
+  var L = 20, R = W - 20;
+  var y = 20;
+
+  // Sender (top-left)
+  doc.setFont('helvetica','bold'); doc.setFontSize(12);
+  doc.text(SENDER.name, L, y);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9);
+  doc.text(SENDER.address, L, y + 14);
+  doc.text(SENDER.csz, L, y + 26);
+  doc.text(SENDER.email, L, y + 38);
+
+  // Ship To (top-right)
+  doc.setFont('helvetica','bold'); doc.setFontSize(11);
+  doc.text('Ship To:', R, y, {align:'right'});
+  doc.setFontSize(13);
+  doc.text(order.ship_name || '', R, y + 16, {align:'right'});
+  doc.setFontSize(11);
+  doc.text(order.ship_addr || '', R, y + 32, {align:'right'});
+  doc.text(order.ship_csz || '', R, y + 46, {align:'right'});
+
+  // Separator line
+  var sepY = y + 54;
+  doc.setLineWidth(0.7); doc.line(L, sepY, R, sepY);
+
+  // Order details — Grove shows units (loose) instead of master cases
+  y = sepY + 14;
+  doc.setFont('helvetica','bold'); doc.setFontSize(11);
+  doc.text('PO: ' + order.po, L, y); y += 14;
+  doc.setFontSize(10);
+  doc.text('Qty: ' + order.boxQty + ' Units (Loose)', L, y); y += 12;
+  doc.setFont('helvetica','normal'); doc.setFontSize(9);
+  doc.text('Description: ' + product.description, L, y); y += 11;
+  doc.text('SKU: ' + product.sku + ' - ' + product.upc, L, y); y += 13;
+  doc.setFont('helvetica','bold'); doc.setFontSize(10);
+  doc.text('B.B. Date: ' + (order.bb||'TBD') + '    LOT: ' + (order.lot||'TBD'), L, y);
+  y += 20;
+
+  // Box ___ of ___ line
+  var bY = y;
+  doc.setFont('helvetica','bold'); doc.setFontSize(11);
+  var boxTextX = L + 18;
+  doc.text('Box', boxTextX, bY);
+  var l1s = boxTextX + 30, l1e = l1s + 76;
+  doc.setLineWidth(0.7); doc.line(l1s, bY + 3, l1e, bY + 3);
+  doc.setFontSize(20);
+  var bnT = order.boxNum.toString(), bnW = doc.getTextWidth(bnT);
+  doc.text(bnT, l1s + (l1e - l1s - bnW) / 2, bY - 1);
+  doc.setFontSize(11); doc.text('of', l1e + 10, bY);
+  var l2s = l1e + 28, l2e = l2s + 76;
+  doc.line(l2s, bY + 3, l2e, bY + 3);
+  doc.setFontSize(20);
+  var qT = order.totalBoxes.toString(), qW = doc.getTextWidth(qT);
+  doc.text(qT, l2s + (l2e - l2s - qW) / 2, bY - 1);
+
+  // Barcode
+  var bcUrl = BARCODE_IMAGES[flavor];
+  var bcW = 280, bcH = 58;
+  var bcX = (W - bcW) / 2;
+  var bcY = bY + 16;
+  if (bcUrl) doc.addImage(bcUrl, 'PNG', bcX, bcY, bcW, bcH);
+}
+
+function generateGroveFlavorLabels(idx) {
+  if (!extractedPO) return;
+  var po = extractedPO;
+  var item = po.line_items[idx];
+  if (!item) return;
+
+  try {
+    var jsPDFLib = window.jspdf;
+    var labelW = 432, labelH = 288;
+    var product = PRODUCTS[item.flavor];
+    if (!product) { showStatus('batchStatus', 'Unknown flavor: ' + item.flavor, 'error'); return; }
+
+    var numBoxes = parseInt(document.getElementById('grove_boxes_' + idx).value) || 1;
+    var doc = new jsPDFLib.jsPDF({ unit: 'pt', format: [labelH, labelW], orientation: 'landscape' });
+    var firstPage = true;
+    var count = 0;
+
+    for (var b = 0; b < numBoxes; b++) {
+      var boxQty, bb, lot;
+
+      if (numBoxes > 1) {
+        // Read per-box values from sub-rows
+        boxQty = parseInt(document.getElementById('grove_boxqty_' + idx + '_' + b)?.value) || 0;
+        bb = (document.getElementById('grove_boxbb_' + idx + '_' + b)?.value || '').trim() || 'TBD';
+        lot = (document.getElementById('grove_boxlot_' + idx + '_' + b)?.value || '').trim() || 'TBD';
+      } else {
+        // Single box — read from main row
+        boxQty = item.qty;
+        bb = (document.getElementById('grove_bb_' + idx)?.value || '').trim() || 'TBD';
+        lot = (document.getElementById('grove_lot_' + idx)?.value || '').trim() || 'TBD';
+      }
+
+      if (!firstPage) doc.addPage([labelH, labelW], 'landscape');
+      firstPage = false;
+
+      var order = {
+        po: po.po_number,
+        boxQty: boxQty,
+        boxNum: b + 1,
+        totalBoxes: numBoxes,
+        ship_name: document.getElementById('ex_ship_name').value,
+        ship_addr: document.getElementById('ex_ship_addr').value,
+        ship_csz: document.getElementById('ex_ship_csz').value,
+        bb: bb,
+        lot: lot
+      };
+
+      addGroveLabelPage(doc, product, item.flavor, order);
+      count++;
+    }
+
+    var flav = item.flavor.toUpperCase().replace(/ /g,'').replace(/&/g,'AND');
+    var fn = 'LABELS_GROVE_' + flav + '_PO' + po.po_number + '.pdf';
+    doc.save(fn);
+    showStatus('batchStatus', 'Saved ' + fn + ' — ' + count + ' label(s)', 'success');
+  } catch(err) {
+    showStatus('batchStatus', 'Error: ' + err.message, 'error');
+    console.error(err);
+  }
+}
+
+function generateAllGroveLabels() {
+  if (!extractedPO) return;
+  var po = extractedPO;
+
+  try {
+    var jsPDFLib = window.jspdf;
+    var labelW = 432, labelH = 288;
+    var doc = new jsPDFLib.jsPDF({ unit: 'pt', format: [labelH, labelW], orientation: 'landscape' });
+    var firstPage = true;
+    var totalLabels = 0;
+
+    po.line_items.forEach(function(item, idx) {
+      var product = PRODUCTS[item.flavor];
+      if (!product) return;
+
+      var numBoxes = parseInt(document.getElementById('grove_boxes_' + idx).value) || 1;
+
+      for (var b = 0; b < numBoxes; b++) {
+        var boxQty, bb, lot;
+
+        if (numBoxes > 1) {
+          boxQty = parseInt(document.getElementById('grove_boxqty_' + idx + '_' + b)?.value) || 0;
+          bb = (document.getElementById('grove_boxbb_' + idx + '_' + b)?.value || '').trim() || 'TBD';
+          lot = (document.getElementById('grove_boxlot_' + idx + '_' + b)?.value || '').trim() || 'TBD';
+        } else {
+          boxQty = item.qty;
+          bb = (document.getElementById('grove_bb_' + idx)?.value || '').trim() || 'TBD';
+          lot = (document.getElementById('grove_lot_' + idx)?.value || '').trim() || 'TBD';
+        }
+
+        if (!firstPage) doc.addPage([labelH, labelW], 'landscape');
+        firstPage = false;
+
+        var order = {
+          po: po.po_number,
+          boxQty: boxQty,
+          boxNum: b + 1,
+          totalBoxes: numBoxes,
+          ship_name: document.getElementById('ex_ship_name').value,
+          ship_addr: document.getElementById('ex_ship_addr').value,
+          ship_csz: document.getElementById('ex_ship_csz').value,
+          bb: bb,
+          lot: lot
+        };
+
+        addGroveLabelPage(doc, product, item.flavor, order);
+        totalLabels++;
+      }
+    });
+
+    var fn = 'LABELS_GROVE_PO' + po.po_number + '.pdf';
+    doc.save(fn);
+    showStatus('batchStatus', 'Saved ' + fn + ' — ' + totalLabels + ' labels across ' + po.line_items.length + ' flavors', 'success');
+  } catch(err) {
+    showStatus('batchStatus', 'Error: ' + err.message, 'error');
+    console.error(err);
+  }
+}
+
 // Generate a single pallet tag page onto a jsPDF doc
 function addPalletTagPage(doc, tagData, palletNum, totalPallets) {
   const W = 288, H = 432; // Portrait 4x6
@@ -4338,6 +4688,7 @@ function matchShipToName(shipToName) {
   if (name.includes('core-mark') || name.includes('core mark') || name.includes('coremark')) return 'coremark';
   if (name.includes('corona') && name.includes('mark')) return 'coremark';
   if (name.includes('hayward') && name.includes('mark')) return 'coremark';
+  if (name.includes('grove')) return 'grove';
   return null;
 }
 
@@ -6293,7 +6644,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.07.04a</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.07.08a</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
