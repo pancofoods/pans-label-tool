@@ -139,7 +139,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.08a</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.14b</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -1120,18 +1120,7 @@ function expandLots(prefix, idx, totalQty, isDC) {
     setTimeout(attachLotPickers, 100);
   }
 
-  // Rebuild pallet assignment table so it reflects new lot structure
-  var palletPrefix = '';
-  if (prefix && prefix.endsWith('_')) {
-    var dcNum = prefix.replace('_', '');
-    palletPrefix = '_dc' + dcNum;
-  }
-  // Save current pallet state, rebuild WITHOUT auto-split, then restore saved values
-  var savedPallet = savePalletState(palletPrefix);
-  setTimeout(function() {
-    buildPalletAssignment(palletPrefix, true);
-    if (savedPallet) restorePalletState(palletPrefix, savedPallet);
-  }, 150);
+  // Pallet assignment is NOT auto-rebuilt here — user clicks Recalculate when ready
 }
 
 // Auto-adjust other lot quantities when one changes (for 2-lot split)
@@ -6653,7 +6642,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.07.08a</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.07.14b</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
