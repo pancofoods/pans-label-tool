@@ -139,7 +139,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.14c</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.15a</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -249,7 +249,7 @@
       <button class="btn btn-primary" onclick="generateAllLabels()" style="margin-top:16px">Generate All Labels</button>
       <div style="margin-top:16px; display:flex; gap:12px; align-items:center;">
         <label style="margin:0;">Total Pallets:</label>
-        <input type="number" id="totalPallets" min="1" value="1" style="width:60px; padding:6px; border:1px solid #ccc; border-radius:4px;">
+        <input type="number" id="totalPallets" min="1" value="1" style="width:60px; padding:6px; border:1px solid #ccc; border-radius:4px;" onchange="buildPalletAssignment('')">
         <button class="btn" onclick="buildPalletAssignment('')" style="padding:8px 16px;background:#6b7280;color:white;border-radius:6px;">Recalculate Pallets</button>
         <button class="btn btn-primary" onclick="generatePalletTags()" style="padding:8px 16px;">Generate Pallet Tags</button>
       </div>
@@ -3174,6 +3174,7 @@ function displayMultiDC(po) {
     palletInput.min = '1';
     palletInput.value = '1';
     palletInput.style.cssText = 'width:60px; padding:6px; border:1px solid #ccc; border-radius:4px;';
+    palletInput.onchange = function() { buildPalletAssignment('_dc' + dcIdx); };
     const palletBtn = document.createElement('button');
     palletBtn.className = 'btn btn-primary';
     palletBtn.textContent = 'Pallet Tags';
@@ -6634,7 +6635,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.07.14c</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.07.15a</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
