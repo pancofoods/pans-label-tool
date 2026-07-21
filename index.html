@@ -139,7 +139,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.15a</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.20b</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -3276,6 +3276,10 @@ function displayMultiDC(po) {
         '<div class="form-group"><label>Routing # / Pro #</label><input type="text" id="sierra_routing" placeholder="e.g. 52209" style="background:white"></div>' +
         '<div class="form-group"><label>SCAC Code (optional)</label><input type="text" id="sierra_scac" placeholder="e.g. OPRD" style="background:white"></div>' +
       '</div>' +
+      '<div class="form-row">' +
+        '<div class="form-group"><label>Ship Date</label><input type="date" id="sierra_ship_date" style="background:white"></div>' +
+        '<div class="form-group"><label>Appointment Time</label><input type="text" id="sierra_appt_time" placeholder="e.g. 14:00" style="background:white"></div>' +
+      '</div>' +
       '<div id="sierraBOLButtons" style="margin-top:12px;"></div>';
     multiDC.appendChild(sierraSection);
 
@@ -3287,6 +3291,9 @@ function displayMultiDC(po) {
       bolHtml += '<button onclick="generateSierraTJXBOL(' + i + ')" class="btn btn-primary" style="padding:10px 20px; font-size:13px;">Generate BOL — ' + dcLabel + '</button>';
     });
     bolHtml += '<button onclick="generateAllSierraTJXBOLs()" class="btn btn-primary" style="padding:10px 20px; font-size:13px; background:#7c3aed;">Generate All BOLs (' + po.shipments.length + ' DCs)</button>';
+    if (po.shipments.length > 1) {
+      bolHtml += '<button onclick="generateCombinedSierraBOL()" class="btn btn-primary" style="padding:10px 20px; font-size:13px; background:#0e7490;">Generate Combined BOL (All DCs)</button>';
+    }
     bolHtml += '</div>';
     bolBtnDiv.innerHTML = bolHtml;
   }
@@ -6281,6 +6288,8 @@ async function generateSierraTJXBOL(dcIdx) {
   const carrier = document.getElementById('sierra_carrier')?.value?.trim() || '';
   const routing = document.getElementById('sierra_routing')?.value?.trim() || '';
   const scac = document.getElementById('sierra_scac')?.value?.trim() || '';
+  const shipDateVal = document.getElementById('sierra_ship_date')?.value || '';
+  const apptTimeVal = document.getElementById('sierra_appt_time')?.value?.trim() || '';
 
   if (!loadId) {
     alert('Please enter the Load # (BOL/Auth #) from the TJX shipping email.');
@@ -6335,6 +6344,14 @@ async function generateSierraTJXBOL(dcIdx) {
     setField('ShipFromAddress', SENDER_BOL.address);
     setField('ShipFromCityStateZIP', SENDER_BOL.csz);
     setField('ShipFromSID', SENDER_BOL.sid);
+    if (shipDateVal) {
+      var sdParts = shipDateVal.split('-');
+      setField('ShipDate', sdParts[1] + '/' + sdParts[2] + '/' + sdParts[0]);
+    }
+    if (apptTimeVal) setField('AppointmentTime', apptTimeVal);
+
+    // Pickup/Delivery Number for this DC
+    setField('PickupDeliveryNumber', dcPO);
 
     // Ship To
     setField('ShipToName', shipment.ship_name || '');
@@ -6409,6 +6426,357 @@ async function generateAllSierraTJXBOLs() {
     // Small delay between downloads so browser doesn't block them
     await new Promise(r => setTimeout(r, 500));
   }
+}
+
+// === COMBINED SIERRA/TJX BOL (jsPDF, matches OpenRoad format) ===
+const OPENROAD_BILLING = { name: 'OpenRoad Global', address: 'PO Box 627', csz: 'Dallas, OR 97338' };
+
+function generateCombinedSierraBOL() {
+  if (!extractedPO || !extractedPO.shipments || extractedPO.shipments.length < 2) {
+    alert('Need at least 2 DCs to generate a combined BOL.');
+    return;
+  }
+
+  var loadId = (document.getElementById('sierra_load_id')?.value || '').trim();
+  var carrier = (document.getElementById('sierra_carrier')?.value || '').trim();
+  var routing = (document.getElementById('sierra_routing')?.value || '').trim();
+  var scac = (document.getElementById('sierra_scac')?.value || '').trim();
+  var shipDateVal = document.getElementById('sierra_ship_date')?.value || '';
+  var apptTime = (document.getElementById('sierra_appt_time')?.value || '').trim();
+
+  if (!loadId) { alert('Please enter the Load # (BOL/Auth #).'); return; }
+
+  var shipments = extractedPO.shipments;
+  var poBase = (extractedPO.po_number || '').trim();
+  var numDCs = shipments.length;
+  var numPallets = numDCs; // 1 pallet per location, always
+
+  // Build pickup/delivery numbers and total weight
+  var pickupNums = [];
+  var grandTotalCases = 0;
+  for (var si = 0; si < shipments.length; si++) {
+    var s = shipments[si];
+    var dcCode = s.dc_code || '';
+    pickupNums.push(dcCode + poBase.replace(/^R?/, 'R'));
+    for (var li = 0; li < s.line_items.length; li++) {
+      if (s.line_items[li].qty > 0) grandTotalCases += s.line_items[li].qty;
+    }
+  }
+  var grandTotalWeight = grandTotalCases * WEIGHT_PER_CASE + PALLET_WEIGHT * numPallets;
+  var pickupStr = pickupNums.join(', ');
+
+  // Format dates
+  var shipDateDisplay = '';
+  if (shipDateVal) {
+    var dp = shipDateVal.split('-');
+    shipDateDisplay = dp[1] + '/' + dp[2] + '/' + dp[0];
+  }
+  var today = new Date();
+  var todayStr = String(today.getMonth() + 1).padStart(2, '0') + '/' + String(today.getDate()).padStart(2, '0') + '/' + today.getFullYear();
+
+  // Ship-to from first DC
+  var shipTo = shipments[0];
+
+  // === Draw BOL with jsPDF ===
+  var jsPDF = window.jspdf.jsPDF;
+  var doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' });
+  var W = 612, H = 792, M = 24, R = W - M;
+  var LW = 0.5; // line width
+  var splitX = 340; // left/right column split
+
+  doc.setLineWidth(LW);
+
+  // Helper: draw rect + label + value on one row
+  function labelRow(x, y, w, h, label, value, opts) {
+    opts = opts || {};
+    doc.rect(x, y, w, h);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+    doc.text(label, x + 3, y + h / 2 + 1);
+    doc.setFont('helvetica', opts.boldVal ? 'bold' : 'normal');
+    doc.setFontSize(opts.valFs || 9);
+    var valX = x + (opts.valIndent || 100);
+    doc.text(value || '', valX, y + h / 2 + 2);
+  }
+
+  // Helper: section header centered in rect
+  function sectionHeader(x, y, w, h, text) {
+    doc.setFillColor(230, 230, 230);
+    doc.rect(x, y, w, h, 'FD');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+    doc.text(text, x + w / 2, y + h / 2 + 2, { align: 'center' });
+  }
+
+  var y = M;
+
+  // === HEADER ROW ===
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+  doc.text('Date: ' + todayStr, M, y + 10);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+  doc.text('BILL OF LADING', W / 2, y + 11, { align: 'center' });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.text('Page 1', R, y + 10, { align: 'right' });
+  y += 18;
+
+  // === LEFT COLUMN: SHIP FROM ===
+  var colL = splitX - M; // left col width
+  var colR = R - splitX; // right col width
+  var rowH = 14;
+
+  sectionHeader(M, y, colL, rowH, 'SHIP FROM');
+  // Right column top: BOL Number area
+  doc.rect(splitX, y, colR, rowH);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+  doc.text('Bill of Lading Number:', splitX + 3, y + 10);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+  doc.text(loadId + '-1', splitX + colR - 5, y + 10, { align: 'right' });
+  y += rowH;
+
+  labelRow(M, y, colL, rowH, 'Name:', SENDER_BOL.name, { valIndent: 80, boldVal: true });
+  doc.rect(splitX, y, colR, rowH);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+  doc.text('CARRIER NAME:', splitX + 3, y + 7);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+  doc.text(carrier, splitX + 3, y + 13);
+  y += rowH;
+
+  labelRow(M, y, colL, rowH, 'Address:', SENDER_BOL.address, { valIndent: 80 });
+  doc.rect(splitX, y, colR, rowH);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+  doc.text('Load:', splitX + 3, y + 10);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.text(loadId, splitX + 60, y + 10);
+  y += rowH;
+
+  labelRow(M, y, colL, rowH, 'City/State/Zip:', SENDER_BOL.csz, { valIndent: 80 });
+  doc.rect(splitX, y, colR, rowH);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+  doc.text('Trailer Number:', splitX + 3, y + 10);
+  y += rowH;
+
+  labelRow(M, y, colL, rowH, 'Ship Date:', shipDateDisplay, { valIndent: 80, boldVal: true });
+  doc.rect(splitX, y, colR, rowH);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+  doc.text('Seal Numbers:', splitX + 3, y + 10);
+  y += rowH;
+
+  labelRow(M, y, colL, rowH, 'Appointment Time:', apptTime, { valIndent: 100, boldVal: true });
+  doc.rect(splitX, y, colR, rowH * 2);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+  doc.text('SCAC:', splitX + 3, y + 8);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.text(scac, splitX + 40, y + 8);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+  doc.text('PRO Number:', splitX + 3, y + 22);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.text(routing, splitX + 70, y + 22);
+  y += rowH;
+
+  // Pickup/Delivery Number row (left col only; right col merged above)
+  labelRow(M, y, colL, rowH, 'Pickup/Delivery Number:', pickupStr, { valIndent: 120, boldVal: true, valFs: 8 });
+  y += rowH;
+
+  // === SHIP TO ===
+  sectionHeader(M, y, colL, rowH, 'SHIP TO');
+  // Right: Freight Charge Terms
+  var freightH = rowH * 3;
+  doc.rect(splitX, y, colR, freightH);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(6);
+  doc.text('Freight Charge Terms (freight charges are prepaid', splitX + 3, y + 8);
+  doc.text('unless marked otherwise):', splitX + 3, y + 15);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+  doc.text('Prepaid _____     Collect _____     Third Party __X__', splitX + 3, y + 26);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(6);
+  doc.text('Master Bill of Lading: with', splitX + colR / 2 + 10, y + 34);
+  doc.text('attached underlying Bills of Lading', splitX + colR / 2 + 10, y + 40);
+  y += rowH;
+
+  labelRow(M, y, colL, rowH, 'Name:', shipTo.ship_name || '*NRT*', { valIndent: 80, boldVal: true });
+  y += rowH;
+
+  labelRow(M, y, colL, rowH, 'Address:', shipTo.ship_addr || '', { valIndent: 80 });
+  y += rowH;
+  // Right col: SPECIAL INSTRUCTIONS header
+  doc.rect(splitX, y, colR, rowH);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+  doc.text('SPECIAL INSTRUCTIONS', splitX + colR / 2, y + 10, { align: 'center' });
+
+  labelRow(M, y, colL, rowH, 'City/State/Zip:', shipTo.ship_csz || '', { valIndent: 80 });
+  y += rowH;
+
+  // Right col: Master BOL Number
+  doc.rect(splitX, y, colR, rowH);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+  doc.text('Master Bill of Lading Number: ' + loadId, splitX + 3, y + 10);
+
+  labelRow(M, y, colL, rowH, 'Delivery Date:', '', { valIndent: 80 });
+  y += rowH;
+
+  labelRow(M, y, colL, rowH, 'Receiving Hours:', '07:00-17:00', { valIndent: 80 });
+  doc.rect(splitX, y, colR, rowH); // empty right cell
+  y += rowH;
+
+  // === THIRD PARTY FREIGHT CHARGES BILL TO ===
+  sectionHeader(M, y, colL, rowH, 'THIRD PARTY FREIGHT CHARGES BILL TO');
+  doc.rect(splitX, y, colR, rowH); // empty right cell
+  y += rowH;
+
+  labelRow(M, y, colL, rowH, 'Name:', OPENROAD_BILLING.name, { valIndent: 80, boldVal: true });
+  doc.rect(splitX, y, colR, rowH);
+  y += rowH;
+
+  labelRow(M, y, colL, rowH, 'Address:', OPENROAD_BILLING.address, { valIndent: 80 });
+  doc.rect(splitX, y, colR, rowH);
+  y += rowH;
+
+  labelRow(M, y, colL, rowH, 'City/State/Zip:', OPENROAD_BILLING.csz, { valIndent: 80 });
+  doc.rect(splitX, y, colR, rowH);
+  y += rowH;
+
+  // === CUSTOMER ORDER INFORMATION ===
+  var fullW = R - M;
+  sectionHeader(M, y, fullW, rowH, 'CUSTOMER ORDER INFORMATION');
+  y += rowH;
+
+  // Column widths for customer order table
+  var coW1 = 200, coW2 = 60, coW3 = 80, coW4 = 80, coW5 = fullW - coW1 - coW2 - coW3 - coW4;
+  // Header
+  doc.setFillColor(245, 245, 245);
+  doc.rect(M, y, coW1, rowH, 'FD'); doc.rect(M + coW1, y, coW2, rowH, 'FD'); doc.rect(M + coW1 + coW2, y, coW3, rowH, 'FD'); doc.rect(M + coW1 + coW2 + coW3, y, coW4, rowH, 'FD'); doc.rect(M + coW1 + coW2 + coW3 + coW4, y, coW5, rowH, 'FD');
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(6);
+  doc.text('CUSTOMER ORDER NUMBER', M + 3, y + 9);
+  doc.text('# PKGS', M + coW1 + coW2 / 2, y + 9, { align: 'center' });
+  doc.text('WEIGHT', M + coW1 + coW2 + coW3 / 2, y + 9, { align: 'center' });
+  doc.text('PALLET/SLIP', M + coW1 + coW2 + coW3 + coW4 / 2, y + 9, { align: 'center' });
+  doc.text('ADDITIONAL SHIPPER INFO', M + coW1 + coW2 + coW3 + coW4 + 3, y + 9);
+  y += rowH;
+
+  // Data row — comma-separated POs in one row (matching OpenRoad format)
+  var dataH = 16;
+  doc.rect(M, y, coW1, dataH); doc.rect(M + coW1, y, coW2, dataH); doc.rect(M + coW1 + coW2, y, coW3, dataH); doc.rect(M + coW1 + coW2 + coW3, y, coW4, dataH); doc.rect(M + coW1 + coW2 + coW3 + coW4, y, coW5, dataH);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+  doc.text(pickupStr, M + 3, y + 11);
+  doc.text(grandTotalWeight + ' lbs', M + coW1 + coW2 + coW3 / 2, y + 11, { align: 'center' });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+  doc.text('Y', M + coW1 + coW2 + coW3 + coW4 / 2 - 12, y + 11);
+  doc.text('N', M + coW1 + coW2 + coW3 + coW4 / 2 + 12, y + 11);
+  y += dataH;
+
+  // Grand Total row
+  doc.setFillColor(245, 245, 245);
+  doc.rect(M, y, coW1, rowH, 'FD'); doc.rect(M + coW1, y, coW2, rowH, 'FD'); doc.rect(M + coW1 + coW2, y, coW3, rowH, 'FD'); doc.rect(M + coW1 + coW2 + coW3, y, coW4, rowH); doc.rect(M + coW1 + coW2 + coW3 + coW4, y, coW5, rowH);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+  doc.text('GRAND TOTAL', M + 3, y + 9);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+  doc.text(grandTotalWeight + ' lbs', M + coW1 + coW2 + coW3 / 2, y + 9, { align: 'center' });
+  y += rowH;
+
+  // === CARRIER INFORMATION ===
+  sectionHeader(M, y, fullW, rowH, 'CARRIER INFORMATION');
+  y += rowH;
+
+  // Carrier sub-headers
+  var ciW = [40, 70, 40, 50, 80, 0]; // QTY, TYPE, QTY, TYPE, WEIGHT, COMMODITY DESC
+  ciW[5] = fullW - ciW[0] - ciW[1] - ciW[2] - ciW[3] - ciW[4];
+
+  // Header row 1: Handling Unit | Package
+  doc.rect(M, y, ciW[0] + ciW[1], rowH); doc.rect(M + ciW[0] + ciW[1], y, fullW - ciW[0] - ciW[1], rowH);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(6);
+  doc.text('HANDLING UNIT', M + (ciW[0] + ciW[1]) / 2, y + 9, { align: 'center' });
+  doc.text('PACKAGE', M + ciW[0] + ciW[1] + 40, y + 9);
+  y += rowH;
+
+  // Header row 2: QTY | TYPE | QTY | TYPE | WEIGHT | COMMODITY DESCRIPTION
+  var cx = M;
+  var ciHeaders = ['QTY', 'TYPE', 'QTY', 'TYPE', 'WEIGHT', 'COMMODITY DESCRIPTION'];
+  for (var ch = 0; ch < ciHeaders.length; ch++) {
+    doc.rect(cx, y, ciW[ch], rowH);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(6);
+    doc.text(ciHeaders[ch], cx + ciW[ch] / 2, y + 9, { align: 'center' });
+    cx += ciW[ch];
+  }
+  y += rowH;
+
+  // Data row: pallets, 0 packages, weight, commodity
+  cx = M;
+  var ciData = [String(numPallets), 'Pallets ( in)', '0', '', grandTotalWeight + ' lbs', 'Dried Mushroom Jerky'];
+  for (var cd = 0; cd < ciData.length; cd++) {
+    doc.rect(cx, y, ciW[cd], dataH);
+    doc.setFont('helvetica', cd === 0 ? 'bold' : 'normal'); doc.setFontSize(cd === 5 ? 8 : 9);
+    doc.text(ciData[cd], cx + ciW[cd] / 2, y + 11, { align: 'center' });
+    cx += ciW[cd];
+  }
+  y += dataH;
+
+  // Grand total row
+  cx = M;
+  var ciTotals = [String(numPallets), '', '', '', grandTotalWeight + ' lbs', 'GRAND TOTAL'];
+  for (var ct = 0; ct < ciTotals.length; ct++) {
+    doc.setFillColor(ct === 5 ? 245 : 255, 245, ct === 5 ? 245 : 255);
+    doc.rect(cx, y, ciW[ct], rowH, 'FD');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(ct === 5 ? 7 : 9);
+    doc.text(ciTotals[ct], cx + ciW[ct] / 2, y + 9, { align: 'center' });
+    cx += ciW[ct];
+  }
+  y += rowH;
+
+  // === LEGAL TEXT ===
+  y += 4;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(5);
+  var legalLeft = 'Where the rate is dependent on value, shippers are required to state specifically in writing the agreed or declared value of the property as follows: The agreed or declared value of the property is specifically stated by the shipper to be not exceeding';
+  var legalRight = 'The carrier shall not make delivery of this shipment without payment of freight and all other lawful charges.';
+  doc.rect(M, y, fullW / 2, 30);
+  doc.text(doc.splitTextToSize(legalLeft, fullW / 2 - 6), M + 3, y + 6);
+  doc.rect(M + fullW / 2, y, fullW / 2, 30);
+  doc.text(doc.splitTextToSize(legalRight, fullW / 2 - 6), M + fullW / 2 + 3, y + 6);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(6);
+  doc.text('________________ Per ________________', M + 3, y + 28);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+  doc.text('Shipper Signature', M + fullW / 2 + 3, y + 28);
+  y += 34;
+
+  // === SIGNATURE BLOCKS ===
+  var sigW = fullW / 3;
+  var sigH = 50;
+
+  // Trailer loaded / Freight counted
+  doc.rect(M + fullW * 0.5, y, fullW * 0.25, 28);
+  doc.rect(M + fullW * 0.75, y, fullW * 0.25, 28);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+  doc.text('Trailer Loaded:', M + fullW * 0.5 + 3, y + 9);
+  doc.text('Freight Counted:', M + fullW * 0.75 + 3, y + 9);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(6);
+  doc.text('By Shipper', M + fullW * 0.5 + 16, y + 18);
+  doc.text('By Driver', M + fullW * 0.5 + 16, y + 25);
+  doc.text('By Shipper    By Driver/Pieces', M + fullW * 0.75 + 16, y + 18);
+  doc.text('By Driver/pallets said to contain', M + fullW * 0.75 + 16, y + 25);
+
+  // Legal disclaimer in left half
+  doc.rect(M, y, fullW * 0.5, 28);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(4.5);
+  var noteText = '"NOTE: Liability Limitation for loss or damage in this shipment may be applicable. See 49 USC 14706(c)(1)(A) and (B). RECEIVED, subject to individually determined rates or contracts that have been agreed upon in writing between the carrier and shipper, if applicable, otherwise to the rates, classifications and rules that have been established by the carrier and are available to the shipper, on request.';
+  doc.text(doc.splitTextToSize(noteText, fullW * 0.5 - 6), M + 3, y + 6);
+  y += 32;
+
+  // Three signature blocks
+  var sigLabels = ['SHIPPER SIGNATURE / DATE', 'CARRIER SIGNATURE / PICKUP DATE', 'RECEIVER SIGNATURE / DATE'];
+  var sigDescs = [
+    'This is to certify that the above named materials are properly classified, described, packaged, marked and labeled, and are in proper condition for transportation according to the applicable regulations of the Department of Transportation.',
+    'Carrier acknowledges receipt of packages and required placards. Carrier certifies emergency response information was made available and/or carrier has the DOT emergency response guidebook or equivalent documentation in the vehicle.\nProperty described above is received in good order, except as noted.',
+    'Signature verifies that all items on BOL have been received without damage and in acceptable condition unless noted on BOL with supporting photographs of damage.'
+  ];
+  for (var sb = 0; sb < 3; sb++) {
+    var sx = M + sb * sigW;
+    doc.rect(sx, y, sigW, sigH);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+    doc.text(sigLabels[sb], sx + 3, y + 8);
+    doc.setLineWidth(0.3);
+    doc.line(sx + 3, y + 18, sx + sigW - 5, y + 18);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(4.5);
+    doc.text(doc.splitTextToSize(sigDescs[sb], sigW - 8), sx + 3, y + 24);
+  }
+
+  // === DOWNLOAD ===
+  doc.save('BOL_Sierra_Combined_' + loadId.replace(/\s+/g, '_') + '.pdf');
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -6635,7 +7003,7 @@ ssccUpdateDisplay();
 
 
 </script>
-<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.07.15a</div>
+<div style="text-align:center;padding:24px 0 12px;color:#aaa;font-size:11px;">rev 2026.07.20b</div>
 
 <!-- Supported Accounts Modal -->
 <div id="accountsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;" onclick="if(event.target===this)this.style.display='none'">
