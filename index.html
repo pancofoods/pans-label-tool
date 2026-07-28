@@ -139,7 +139,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.28c</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.28d</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -3384,7 +3384,7 @@ async function handleTJXShippingPDF(file) {
           'Only generate below if the assigned carrier is <em>not</em> ArcBest or XPO.' +
         '</div>'
       : '';
-    btnEl.innerHTML = carrierNote + '<button onclick="generateAllHomeGoodsBOLs()" class="btn btn-primary" style="padding:10px 24px; font-size:14px;">Generate All BOLs (' + tjxShippingData.deliveryOrders.length + ' DCs)</button>';
+    btnEl.innerHTML = carrierNote + '<button onclick="generateAllHomeGoodsBOLs()" class="btn btn-primary" style="padding:10px 24px; font-size:14px;">Generate Combined BOL (1 file · ' + tjxShippingData.deliveryOrders.length + ' DCs)</button>';
 
   } catch (err) {
     statusEl.textContent = 'Error parsing PDF: ' + err.message;
@@ -3498,7 +3498,12 @@ function generateAllHomeGoodsBOLs() {
   var po = extractedPO;
   var tjx = tjxShippingData;
   var { jsPDF } = window.jspdf;
-  var filesCreated = 0;
+
+  // 1 Load ID = 1 BOL: build ONE PDF with a page per DC that's actually on this
+  // load (i.e. has a matching delivery order in the shipping email). DCs on the
+  // PO but not on this load are skipped.
+  var doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' });
+  var pages = 0;
 
   for (var s = 0; s < po.shipments.length; s++) {
     var shipment = po.shipments[s];
@@ -3512,20 +3517,24 @@ function generateAllHomeGoodsBOLs() {
         break;
       }
     }
+    if (!deliveryOrder) continue; // this DC isn't on the load
 
-    var doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' });
+    if (pages > 0) doc.addPage();
     drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po);
-
-    // Build filename
-    var dcLabel = (shipment.dc_code || shipment.ship_name.split('#')[1] || s).toString().trim();
-    var shortName = shipment.ship_name.match(/-\s*(\w+)/);
-    shortName = shortName ? shortName[1] : dcLabel;
-    var fn = 'BOL_HomeGoods_DC' + dcLabel + '_' + shortName + '_PO' + (shipment.dc_po || po.po_number).replace(/\s+/g, '_') + '.pdf';
-    doc.save(fn);
-    filesCreated++;
+    pages++;
   }
 
-  showStatus('tjxStatus', 'Created ' + filesCreated + ' BOL PDFs', 'success');
+  if (pages === 0) {
+    alert('None of the loaded PO’s DCs match this shipping email — check that the PO and shipping instructions are for the same order.');
+    return;
+  }
+
+  // One combined file for the whole load.
+  var fn = 'BOL_HomeGoods_LoadID_' + String(tjx.loadId || 'NA').replace(/\s+/g, '_') +
+           '_PO' + String(po.po_number || '').replace(/\s+/g, '_') + '_' + pages + 'pages.pdf';
+  doc.save(fn);
+
+  showStatus('tjxStatus', 'Created 1 combined BOL (' + pages + ' page' + (pages === 1 ? '' : 's') + ') for Load ' + (tjx.loadId || ''), 'success');
 }
 
 function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) {
@@ -3718,7 +3727,8 @@ function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   var instructions = [
-    'TJX Load ID: ' + tjx.loadId + '  |  Pickup Date: ' + pickupDate + '  |  Terms: Freight Collect',
+    'TJX Load ID: ' + tjx.loadId + '  |  Pickup Date: ' + pickupDate + '  |  Terms: 3rd Party Collect to TJX',
+    '1 Load ID = 1 BOL. Do not separate BOLs per PO.',
     'Carrier contacts Vendor to schedule pickup.',
     'All pallets must be loaded using the pinwheeled method.',
     'Pallets must be built to 7ft high to maximize trailer utilization (4ft for double-stacked).',
