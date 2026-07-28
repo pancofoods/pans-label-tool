@@ -139,7 +139,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.28b</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.28c</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -3371,10 +3371,20 @@ async function handleTJXShippingPDF(file) {
         '</table>' +
       '</div>';
 
-    // Show Generate BOLs button
+    // Show Generate BOLs button. When the assigned carrier is ArcBest or XPO,
+    // the routing instructions say the carrier issues the Master BOL — so warn,
+    // but still leave generation available as an option.
     const btnEl = document.getElementById('tjxBOLButtons');
     btnEl.style.display = 'block';
-    btnEl.innerHTML = '<button onclick="generateAllHomeGoodsBOLs()" class="btn btn-primary" style="padding:10px 24px; font-size:14px;">Generate All BOLs (' + tjxShippingData.deliveryOrders.length + ' DCs)</button>';
+    var carrierIssuesBOL = /arcbest|xpo/i.test(tjxShippingData.carrier || '');
+    var carrierNote = carrierIssuesBOL
+      ? '<div style="margin-bottom:12px; padding:12px; background:#fffbeb; border:1px solid #fcd34d; border-radius:8px; font-size:13px; color:#92400e;">' +
+          '📋 <strong>Routing instructions say the BOL should come from the carrier.</strong> ' +
+          (tjxShippingData.carrier || 'The carrier') + ' will email you the Master BOL before pickup — provide that one to the driver (a self-made BOL may result in additional fees). ' +
+          'Only generate below if the assigned carrier is <em>not</em> ArcBest or XPO.' +
+        '</div>'
+      : '';
+    btnEl.innerHTML = carrierNote + '<button onclick="generateAllHomeGoodsBOLs()" class="btn btn-primary" style="padding:10px 24px; font-size:14px;">Generate All BOLs (' + tjxShippingData.deliveryOrders.length + ' DCs)</button>';
 
   } catch (err) {
     statusEl.textContent = 'Error parsing PDF: ' + err.message;
