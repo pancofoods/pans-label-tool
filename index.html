@@ -139,7 +139,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.28a</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.28b</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -3337,9 +3337,25 @@ async function handleTJXShippingPDF(file) {
     statusEl.textContent = 'TJX shipping instructions loaded — ' + tjxShippingData.deliveryOrders.length + ' delivery orders found';
     statusEl.className = 'status success';
 
+    // Mismatch guard: if a PO is loaded but none/only-some of the shipping
+    // email's delivery orders resolve to a DC, the email is probably for a
+    // different PO than the one loaded.
+    var matchedDOs = tjxShippingData.deliveryOrders.filter(function(d) { return d.dcName; }).length;
+    var totalDOs = tjxShippingData.deliveryOrders.length;
+    var mismatchWarning = '';
+    if (extractedPO && totalDOs > 0 && matchedDOs < totalDOs) {
+      mismatchWarning =
+        '<div style="margin-top:12px; padding:12px; background:#fef2f2; border:1px solid #fca5a5; border-radius:8px; font-size:13px; color:#991b1b;">' +
+          '⚠ <strong>' + (totalDOs - matchedDOs) + ' of ' + totalDOs + ' delivery orders did not match the loaded PO' +
+          (extractedPO.po_number ? ' (#' + extractedPO.po_number + ')' : '') + '.</strong> ' +
+          'This shipping email is likely for a different PO — load the distribution instructions for the same order before generating BOLs.' +
+        '</div>';
+    }
+
     const infoEl = document.getElementById('tjxParsedInfo');
     infoEl.style.display = 'block';
     infoEl.innerHTML =
+      mismatchWarning +
       '<div style="margin-top:12px; padding:12px; background:white; border:1px solid #e5e7eb; border-radius:8px; font-size:13px;">' +
         '<div><strong>Carrier:</strong> ' + tjxShippingData.carrier + '</div>' +
         '<div><strong>Carrier Phone:</strong> ' + tjxShippingData.carrierPhone + '</div>' +
@@ -3420,7 +3436,9 @@ function parseTJXShippingEmail(text) {
       basePO = poPrefixMatch[2];
     }
 
-    // Look up DC name from extractedPO shipments
+    // Look up DC name + case count from the loaded distribution PO by matching the
+    // email's DC prefix to the shipment (proven prefix match). The shipping email
+    // itself lists cases as 0, so the real case count comes from the PO line items.
     var dcName = '';
     var dcCode = '';
     if (extractedPO && extractedPO.shipments) {
@@ -3429,6 +3447,9 @@ function parseTJXShippingEmail(text) {
         if (shipment.dc_po && shipment.dc_po.indexOf(dcPrefix) === 0) {
           dcName = shipment.ship_name;
           dcCode = shipment.dc_code || '';
+          if (shipment.line_items && shipment.line_items.length) {
+            cases = shipment.line_items.reduce(function(sum, li) { return sum + (parseInt(li.qty) || 0); }, 0);
+          }
           break;
         }
       }
