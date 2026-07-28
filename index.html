@@ -3229,8 +3229,10 @@ function displayMultiDC(po) {
   });
   setTimeout(attachLotPickers, 100);
 
-  // === TJX Shipping Instructions Upload (HomeGoods only) ===
-  if (po.banner === 'HomeGoods') {
+  // === TJX Shipping Instructions Upload (all TJX multi-DC banners) ===
+  // Shows for HomeGoods, TJ Maxx, Marshalls, and generic "TJX" multi-DC POs.
+  // (Sierra has its own routing/BOL section below.)
+  if (po.multi_dc && po.banner !== 'Sierra') {
     const tjxSection = document.createElement('div');
     tjxSection.style.cssText = 'margin-top:24px; padding:20px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px;';
     tjxSection.innerHTML =
@@ -3380,8 +3382,9 @@ function parseTJXShippingEmail(text) {
   var pickupMatch = text.match(/TJX\s+Pickup\s+Date\s+(\d{1,2}\/\d{1,2}\/\d{4})/i);
   var pickupDate = pickupMatch ? pickupMatch[1] : '';
 
-  // Load ID
-  var loadMatch = text.match(/Load\s+ID\s+(\d+)/i);
+  // Load ID — TJX glues the number to the label ("Load ID10129114"), so allow
+  // no/any space between "Load ID" and the 6+ digit number.
+  var loadMatch = text.match(/Load\s*ID[:\s]*?(\d{6,})/i);
   var loadId = loadMatch ? loadMatch[1] : '';
 
   // Destination/consolidator address
@@ -3393,20 +3396,23 @@ function parseTJXShippingEmail(text) {
     consolidator.csz = destMatch[3].trim().replace(/,\s*,/, ',');
   }
 
-  // Parse delivery order table
-  // Format: "16396168  10639836HMG 0  215  0  142  1  N"
-  // PO numbers are like "X0639836HMG" where X is the DC prefix (10, 20, 30, etc.)
-  var doPattern = /(\d{8})\s+(\d+HMG)\s*\d*\s+(\d+)\s+/g;
+  // Parse delivery order table. TJX renders these rows with the columns run
+  // together (no spaces) and different banner suffixes, e.g.
+  //   "1681465810140219HMG01501421N"  (HomeGoods)
+  //   "1651325401127035MAR01301421N"  (Marshalls) / "...127036TJM..." (TJ Maxx)
+  // So we match: 8-digit Delivery Order # + PO (digits ending in a 2-4 letter
+  // banner suffix). Cases/weight for the BOL come from the PO line items.
+  var doPattern = /(\d{8})\s*(\d+[A-Z]{2,4})/g;
   var deliveryOrders = [];
   var doMatch;
   while ((doMatch = doPattern.exec(text)) !== null) {
     var doNumber = doMatch[1];
-    var poRaw = doMatch[2]; // e.g. "10639836HMG"
-    var cases = parseInt(doMatch[3]);
+    var poRaw = doMatch[2]; // e.g. "10140219HMG" / "01127035MAR"
+    var cases = 0;
 
-    // Extract DC prefix from PO: first 2 digits map to DC prefix
-    // "10639836HMG" → prefix "10", base PO "639836"
-    var poPrefixMatch = poRaw.match(/^(\d{2})(\d+)HMG$/i);
+    // Extract DC prefix from PO: first 2 digits = DC prefix, then base PO,
+    // then the banner suffix (HMG/TJM/MAR/...).
+    var poPrefixMatch = poRaw.match(/^(\d{2})(\d+)([A-Z]{2,4})$/i);
     var dcPrefix = '';
     var basePO = '';
     if (poPrefixMatch) {
