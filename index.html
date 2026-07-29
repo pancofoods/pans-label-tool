@@ -139,7 +139,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.28d</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.28f</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -3384,7 +3384,7 @@ async function handleTJXShippingPDF(file) {
           'Only generate below if the assigned carrier is <em>not</em> ArcBest or XPO.' +
         '</div>'
       : '';
-    btnEl.innerHTML = carrierNote + '<button onclick="generateAllHomeGoodsBOLs()" class="btn btn-primary" style="padding:10px 24px; font-size:14px;">Generate Combined BOL (1 file · ' + tjxShippingData.deliveryOrders.length + ' DCs)</button>';
+    btnEl.innerHTML = carrierNote + '<button onclick="generateAllHomeGoodsBOLs()" class="btn btn-primary" style="padding:10px 24px; font-size:14px;">Generate BOL (1 Load ID = 1 BOL · ' + tjxShippingData.deliveryOrders.length + ' DCs)</button>';
 
   } catch (err) {
     statusEl.textContent = 'Error parsing PDF: ' + err.message;
@@ -3499,16 +3499,13 @@ function generateAllHomeGoodsBOLs() {
   var tjx = tjxShippingData;
   var { jsPDF } = window.jspdf;
 
-  // 1 Load ID = 1 BOL: build ONE PDF with a page per DC that's actually on this
-  // load (i.e. has a matching delivery order in the shipping email). DCs on the
-  // PO but not on this load are skipped.
-  var doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' });
-  var pages = 0;
-
+  // 1 Load ID = 1 BOL: collect every DC that's actually on this load (i.e. has a
+  // matching delivery order in the shipping email) and aggregate them onto ONE
+  // BOL page. DCs on the PO but not on this load are skipped.
+  var destinations = [];
   for (var s = 0; s < po.shipments.length; s++) {
     var shipment = po.shipments[s];
 
-    // Find matching delivery order by DC PO prefix
     var deliveryOrder = null;
     for (var d = 0; d < tjx.deliveryOrders.length; d++) {
       var dOrder = tjx.deliveryOrders[d];
@@ -3519,53 +3516,63 @@ function generateAllHomeGoodsBOLs() {
     }
     if (!deliveryOrder) continue; // this DC isn't on the load
 
-    if (pages > 0) doc.addPage();
-    drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po);
-    pages++;
+    destinations.push({ shipment: shipment, deliveryOrder: deliveryOrder });
   }
 
-  if (pages === 0) {
+  if (destinations.length === 0) {
     alert('None of the loaded PO’s DCs match this shipping email — check that the PO and shipping instructions are for the same order.');
     return;
   }
 
-  // One combined file for the whole load.
-  var fn = 'BOL_HomeGoods_LoadID_' + String(tjx.loadId || 'NA').replace(/\s+/g, '_') +
-           '_PO' + String(po.po_number || '').replace(/\s+/g, '_') + '_' + pages + 'pages.pdf';
+  // One BOL, one page, aggregated across all destinations on the load.
+  var doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' });
+  drawHomeGoodsBOL(doc, destinations, tjx, po);
+
+  var fn = 'BOL_LoadID_' + String(tjx.loadId || 'NA').replace(/\s+/g, '_') +
+           '_PO' + String(po.po_number || '').replace(/\s+/g, '_') + '.pdf';
   doc.save(fn);
 
-  showStatus('tjxStatus', 'Created 1 combined BOL (' + pages + ' page' + (pages === 1 ? '' : 's') + ') for Load ' + (tjx.loadId || ''), 'success');
+  showStatus('tjxStatus', 'Created 1 BOL for Load ' + (tjx.loadId || '') + ' (' + destinations.length + ' DC' + (destinations.length === 1 ? '' : 's') + ')', 'success');
 }
 
-function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) {
+function drawHomeGoodsBOL(doc, destinations, tjx, po) {
   var W = 612, H = 792;
-  var M = 36; // margin
+  var M = 36;                 // margin
   var R = W - M;
   var midX = W / 2;
+  var pad = 6;
 
-  // Calculate totals
+  // ── Aggregate across all destinations on this Load ID ──
+  var aggByFlavor = {};       // flavor -> total cases
+  var flavorOrder = [];
   var totalCases = 0;
-  var items = shipment.line_items || [];
-  for (var i = 0; i < items.length; i++) {
-    totalCases += items[i].qty;
+  for (var d = 0; d < destinations.length; d++) {
+    var li = destinations[d].shipment.line_items || [];
+    for (var j = 0; j < li.length; j++) {
+      var fl = li[j].flavor;
+      var q = parseInt(li[j].qty) || 0;
+      if (!(fl in aggByFlavor)) { aggByFlavor[fl] = 0; flavorOrder.push(fl); }
+      aggByFlavor[fl] += q;
+      totalCases += q;
+    }
   }
+
   var caseWeightLb = 6;
   var palletWeightLb = 40;
+  // Destinations can't share pallets, so at least one pallet per destination.
+  var numPallets = destinations.length;
   var totalProductWeight = totalCases * caseWeightLb;
-  var numPallets = 1;
   var totalWeight = totalProductWeight + (numPallets * palletWeightLb);
 
-  var poNumber = shipment.dc_po || po.po_number;
-  var doNumber = deliveryOrder ? deliveryOrder.doNumber : '';
   var pickupDate = tjx.pickupDate || '';
 
-  var y = M;
+  var y = M; // y increases DOWNWARD throughout
 
   // === TITLE ===
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
-  doc.text('BILL OF LADING', midX, y, { align: 'center' });
-  y += 14;
+  doc.text('BILL OF LADING', midX, y + 6, { align: 'center' });
+  y += 20;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.text('Straight Bill of Lading \u2014 Short Form \u2014 Not Negotiable', midX, y, { align: 'center' });
@@ -3575,133 +3582,143 @@ function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.text('Date: ' + pickupDate, M, y);
-  doc.text('Load ID: ' + tjx.loadId, midX - 30, y);
-  doc.text('PO #: ' + poNumber, R, y, { align: 'right' });
-  y += 4;
+  doc.text('Load ID: ' + tjx.loadId, midX, y, { align: 'center' });
+  doc.text('Base PO #: ' + (po.po_number || ''), R, y, { align: 'right' });
+  y += 6;
   doc.setLineWidth(0.5);
   doc.line(M, y, R, y);
-  y += 16;
+  y += 14;
 
   // === SHIPPER / CONSIGNEE / CARRIER ===
-  var boxTop = y + 4;
   var col1X = M;
   var col2X = M + 186;
   var col3X = M + 372;
   var col1W = 182;
   var col2W = 182;
   var col3W = R - col3X;
+  var boxTop = y;
 
   function drawBlock(x, w, label, lines) {
-    var ly = boxTop - 2;
+    var ly = boxTop + 10;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
     doc.text(label, x + 4, ly);
     ly += 12;
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    for (var li = 0; li < lines.length; li++) {
-      if (lines[li].length > 0) {
-        // Auto-shrink long lines
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i] && lines[i].length > 0) {
         var fs = 9;
         doc.setFontSize(fs);
-        while (doc.getTextWidth(lines[li]) > w - 8 && fs > 6) { fs -= 0.5; doc.setFontSize(fs); }
-        doc.text(lines[li], x + 4, ly);
-        ly += 11;
+        while (doc.getTextWidth(lines[i]) > w - 8 && fs > 6) { fs -= 0.5; doc.setFontSize(fs); }
+        doc.text(lines[i], x + 4, ly);
         doc.setFontSize(9);
+        ly += 11;
       }
     }
     return ly;
   }
 
   var y1 = drawBlock(col1X, col1W, 'SHIPPER:', [BOL_CONSTANTS.shipFrom.name, BOL_CONSTANTS.shipFrom.addr, BOL_CONSTANTS.shipFrom.csz]);
-  var y2 = drawBlock(col2X, col2W, 'CONSIGNEE:', [tjx.consolidator.name, tjx.consolidator.addr, tjx.consolidator.csz]);
+  var y2 = drawBlock(col2X, col2W, 'CONSIGNEE (Consolidator):', [tjx.consolidator.name, tjx.consolidator.addr, tjx.consolidator.csz]);
   var y3 = drawBlock(col3X, col3W, 'CARRIER:', [tjx.carrier, 'Ph: ' + tjx.carrierPhone, tjx.carrierEmail ? 'Email: ' + tjx.carrierEmail : '']);
 
-  y = Math.min(y1, y2, y3) - 6;
+  var boxBottom = Math.max(y1, y2, y3) + pad - 6;
   doc.setLineWidth(0.3);
-  doc.rect(col1X, y, col1W, boxTop - y + 6);
-  doc.rect(col2X, y, col2W, boxTop - y + 6);
-  doc.rect(col3X, y, col3W, boxTop - y + 6);
-  y -= 16;
+  doc.rect(col1X, boxTop, col1W, boxBottom - boxTop);
+  doc.rect(col2X, boxTop, col2W, boxBottom - boxTop);
+  doc.rect(col3X, boxTop, col3W, boxBottom - boxTop);
+  y = boxBottom + 14;
 
-  // === FINAL DESTINATION (DC) ===
-  var destTop = y + 4;
+  // === DELIVERY ORDERS ON THIS LOAD (reference for consolidator sortation) ===
+  // Per TJX: ship-to is the consolidator above; the DCs are downstream only.
+  var destTop = y;
+  y += 12;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  doc.text('FINAL DESTINATION (DC):', M + 4, y);
+  doc.text('DELIVERY ORDERS ON THIS LOAD ID (' + destinations.length + ' POs \u2014 ship to Consignee above):', M + 4, y);
+  y += 13;
+  var dCols = [M + 4, M + 110, M + 400, R - 60];
+  var dLabels = ['DELIVERY ORDER #', 'DOWNSTREAM DC', 'PO #', 'CASES'];
+  doc.setFontSize(7.5);
+  for (var c = 0; c < dLabels.length; c++) {
+    if (c === dLabels.length - 1) doc.text(dLabels[c], R - 4, y, { align: 'right' });
+    else doc.text(dLabels[c], dCols[c], y);
+  }
+  y += 3;
+  doc.line(M, y, R, y);
+  y += 11;
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.text(shipment.ship_name, M + 140, y);
-  y -= 11;
-  doc.text(shipment.ship_addr || '', M + 140, y);
-  y -= 11;
-  doc.text(shipment.ship_csz || '', M + 140, y);
+  doc.setFontSize(8.5);
+  for (var i = 0; i < destinations.length; i++) {
+    var sh = destinations[i].shipment;
+    var dOrd = destinations[i].deliveryOrder;
+    var dcCases = (sh.line_items || []).reduce(function(s, it) { return s + (parseInt(it.qty) || 0); }, 0);
+    doc.text(dOrd ? dOrd.doNumber : '', dCols[0], y);
+    var nm = sh.ship_name || '';
+    var fs2 = 8.5; doc.setFontSize(fs2);
+    while (doc.getTextWidth(nm) > (dCols[2] - dCols[1] - 6) && fs2 > 6) { fs2 -= 0.5; doc.setFontSize(fs2); }
+    doc.text(nm, dCols[1], y);
+    doc.setFontSize(8.5);
+    doc.text(sh.dc_po || '', dCols[2], y);
+    doc.text('' + dcCases, R - 4, y, { align: 'right' });
+    y += 12;
+  }
+  y += pad - 3;
+  doc.rect(M, destTop, R - M, y - destTop);
+  y += 14;
 
-  // Delivery order on right
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.text('DELIVERY ORDER #:', col3X + 4, destTop);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.text(doNumber, col3X + 4, destTop - 13);
-
-  y -= 6;
-  doc.rect(M, y, R - M, destTop - y + 6);
-  y -= 18;
-
-  // === ITEM TABLE ===
+  // === AGGREGATED ITEM TABLE ===
   var tableTop = y;
-  var colXs = [M + 4, M + 70, M + 120, M + 190, M + 420];
+  var colXs = [M + 4, M + 80, M + 135, M + 205, R - 60];
   var colLabels = ['QTY (Cases)', 'Units', 'SKU', 'Description', 'Weight (lb)'];
-
+  y += 12;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   for (var c = 0; c < colLabels.length; c++) {
-    doc.text(colLabels[c], colXs[c], y);
+    if (c === colLabels.length - 1) doc.text(colLabels[c], R - 4, y, { align: 'right' });
+    else doc.text(colLabels[c], colXs[c], y);
   }
-  y -= 4;
+  y += 4;
   doc.line(M, y, R, y);
-  y -= 12;
+  y += 13;
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  for (var i = 0; i < items.length; i++) {
-    var item = items[i];
-    var product = PRODUCTS[item.flavor];
+  var totalUnits = 0;
+  for (var i = 0; i < flavorOrder.length; i++) {
+    var flavor = flavorOrder[i];
+    var qty = aggByFlavor[flavor];
+    var product = PRODUCTS[flavor];
     var unitsPerCase = (product && product.size === '1oz') ? 48 : 24;
-    var units = item.qty * unitsPerCase;
-    var weight = item.qty * caseWeightLb;
+    var units = qty * unitsPerCase;
+    var weight = qty * caseWeightLb;
     var sku = product ? product.sku : '';
+    totalUnits += units;
 
-    doc.text('' + item.qty, colXs[0], y);
+    doc.text('' + qty, colXs[0], y);
     doc.text('' + units, colXs[1], y);
     doc.text(sku, colXs[2], y);
-    doc.text("Pan's Mushroom Jerky - " + item.flavor, colXs[3], y);
-    doc.text('' + weight, colXs[4], y);
-    y -= 14;
+    doc.text("Pan's Mushroom Jerky - " + flavor, colXs[3], y);
+    doc.text('' + weight, R - 4, y, { align: 'right' });
+    y += 14;
   }
 
-  // Totals
-  y -= 2;
-  doc.line(M, y + 10, R, y + 10);
+  // Totals row
+  doc.line(M, y - 3, R, y - 3);
+  y += 8;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
-  var totalUnits = 0;
-  for (var i = 0; i < items.length; i++) {
-    var product = PRODUCTS[items[i].flavor];
-    var upc = (product && product.size === '1oz') ? 48 : 24;
-    totalUnits += items[i].qty * upc;
-  }
   doc.text('' + totalCases, colXs[0], y);
   doc.text('' + totalUnits, colXs[1], y);
   doc.text('TOTAL', colXs[3], y);
-  doc.text('' + totalProductWeight, colXs[4], y);
-
-  doc.rect(M, y - 6, R - M, tableTop - y + 16);
-  y -= 22;
+  doc.text('' + totalProductWeight, R - 4, y, { align: 'right' });
+  y += pad;
+  doc.rect(M, tableTop, R - M, y - tableTop);
+  y += 14;
 
   // === SUMMARY ROW ===
-  var sumTop = y + 4;
+  var sumTop = y;
+  y += 12;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   var sumItems = [
@@ -3712,18 +3729,19 @@ function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) {
   ];
   var sumSpacing = (R - M) / sumItems.length;
   for (var si = 0; si < sumItems.length; si++) {
-    doc.text(sumItems[si], M + 4 + si * sumSpacing, y);
+    doc.text(sumItems[si], M + 6 + si * sumSpacing, y);
   }
-  y -= 6;
-  doc.rect(M, y, R - M, sumTop - y + 6);
-  y -= 24;
+  y += pad;
+  doc.rect(M, sumTop, R - M, y - sumTop);
+  y += 14;
 
   // === SPECIAL INSTRUCTIONS ===
-  var instTop = y + 4;
+  var instTop = y;
+  y += 12;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.text('SPECIAL INSTRUCTIONS:', M + 4, y);
-  y -= 13;
+  y += 13;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   var instructions = [
@@ -3737,21 +3755,21 @@ function drawHomeGoodsBOL(doc, shipment, deliveryOrder, tjx, po) {
   ];
   for (var ins = 0; ins < instructions.length; ins++) {
     doc.text(instructions[ins], M + 4, y);
-    y -= 11;
+    y += 11;
   }
-  y -= 2;
-  doc.rect(M, y, R - M, instTop - y + 6);
-  y -= 30;
+  y += pad - 4;
+  doc.rect(M, instTop, R - M, y - instTop);
+  y += 20;
 
   // === SIGNATURES ===
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.text('Shipper Signature: ___________________________________', M, y);
   doc.text('Carrier Signature: ___________________________________', midX + 20, y);
-  y -= 16;
+  y += 18;
   doc.text('Date: ________________', M, y);
   doc.text('Date: ________________', midX + 20, y);
-  y -= 20;
+  y += 22;
 
   // === FOOTER ===
   doc.setFontSize(7);
