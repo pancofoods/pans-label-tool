@@ -139,7 +139,7 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:baseline;">
     <h1>Pan&#8217;s Mushroom Jerky</h1>
-    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.28h</span>
+    <span style="font-size:11px;color:#999;font-family:monospace;" id="revTag">rev 2026.07.28i</span>
   </div>
   <p class="subtitle">Shipping Label Generator <span id="registryStatus" class="lot-picker-status disconnected">Registry offline</span> <button onclick="loadRegistryLots()" style="font-size:11px;color:#2563eb;cursor:pointer;border:none;background:none;text-decoration:underline">Reload</button></p>
 
@@ -3686,7 +3686,7 @@ function drawHomeGoodsBOL(doc, destinations, tjx, po) {
     }
   }
 
-  var caseWeightLb = 6;
+  var caseWeightLb = 5;  // gross lb per master case (matches BOL_CONSTANTS.weightPerCase)
   var palletWeightLb = 40;
   // Destinations can't share pallets, so at least one pallet per destination.
   var numPallets = destinations.length;
